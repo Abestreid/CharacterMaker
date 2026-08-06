@@ -1,0 +1,36 @@
+import type { ColorCatalogOption } from '../core';
+
+export const CLOTHING_COLORS = [
+  { id: "white", label: "Белый", hex: "#FFFFFF" },
+  { id: "black", label: "Черный", hex: "#000000" },
+  { id: "gray", label: "Серый", hex: "#808080" },
+  { id: "dark_gray", label: "Темно-серый", hex: "#36454F" },
+  { id: "light_gray", label: "Светло-серый", hex: "#D3D3D3" },
+  { id: "red", label: "Красный", hex: "#FF0000" },
+  { id: "dark_red", label: "Темно-красный", hex: "#8B0000" },
+  { id: "blue", label: "Синий", hex: "#0000FF" },
+  { id: "light_blue", label: "Голубой", hex: "#ADD8E6" },
+  { id: "dark_blue", label: "Темно-синий", hex: "#00008B" },
+  { id: "green", label: "Зеленый", hex: "#008000" },
+  { id: "light_green", label: "Светло-зеленый", hex: "#90EE90" },
+  { id: "dark_green", label: "Темно-зеленый", hex: "#006400" },
+  { id: "yellow", label: "Желтый", hex: "#FFFF00" },
+  { id: "orange", label: "Оранжевый", hex: "#FFA500" },
+  { id: "purple", label: "Фиолетовый", hex: "#800080" },
+  { id: "pink", label: "Розовый", hex: "#FFC0CB" },
+  { id: "brown", label: "Коричневый", hex: "#A52A2A" },
+  { id: "beige", label: "Бежевый", hex: "#F5F5DC" },
+  { id: "khaki", label: "Хаки", hex: "#C3B091" },
+  { id: "teal", label: "Бирюзовый", hex: "#008080" },
+  { id: "cyan", label: "Голубой (циан)", hex: "#00FFFF" },
+  { id: "magenta", label: "Пурпурный", hex: "#FF00FF" },
+  { id: "gold", label: "Золотой", hex: "#FFD700" },
+  { id: "silver", label: "Серебряный", hex: "#C0C0C0" },
+  { id: "denim", label: "Деним", hex: "#6F8FAF" },
+  { id: "red_plaid", label: "Красная клетка", hex: "#FF0000" },
+  { id: "blue_plaid", label: "Синяя клетка", hex: "#0000FF" },
+  { id: "green_plaid", label: "Зеленая клетка", hex: "#008000" },
+  { id: "metallic_teal", label: "Бирюзовый металлик", hex: "#008080" },
+] as const satisfies readonly ColorCatalogOption[];
+
+export type ClothingColorId = typeof CLOTHING_COLORS[number]['id'];
