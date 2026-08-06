@@ -1,0 +1,5 @@
+{
+  "name": "Рефакторинг Версия с пресетом и рефференсом сцен",
+  "description": "An application to generate detailed character visuals using AI. Define physical attributes, clothing, and style to create a three-view character sheet (portrait, full body, and back view).",
+  "requestFramePermissions": []
+}
