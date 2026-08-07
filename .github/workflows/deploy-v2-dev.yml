@@ -17,7 +17,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APP_DIR: refactor-v2
   DEPLOY_DIR: /htdocs/dev
   DEPLOY_URL: https://charmaker.free.nf/dev/
 
@@ -38,8 +37,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: refactor-v2/package-lock.json
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
