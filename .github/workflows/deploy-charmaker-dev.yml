@@ -8,6 +8,12 @@ on:
     paths:
       - 'refactor-v2/**'
       - '.github/workflows/deploy-charmaker-dev.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'refactor-v2/**'
+      - '.github/workflows/deploy-charmaker-dev.yml'
 
 concurrency:
   group: charmaker-dev-deploy
@@ -15,6 +21,7 @@ concurrency:
 
 jobs:
   build-and-deploy:
+    if: github.event_name != 'pull_request' || github.head_ref == 'refactor/domain-catalog-v2'
     runs-on: ubuntu-latest
 
     defaults:
@@ -45,9 +52,9 @@ jobs:
 
       - name: Deploy dist to InfinityFree /dev
         env:
-          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER }}
-          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME }}
-          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD }}
+          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME || secrets.FTP_USERNAME || secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD || secrets.FTP_PASSWORD || secrets.FTP_PASS }}
         run: |
           test -n "$FTP_SERVER"
           test -n "$FTP_USERNAME"
@@ -62,3 +69,36 @@ jobs:
             mirror --reverse --delete --verbose --parallel=4 --create-dirs dist/ /htdocs/dev/;
             bye
           "
+
+      - name: Smoke check deployed site
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl --fail --location --silent --show-error --max-time 30 https://charmaker.free.nf/dev/ -o /tmp/charmaker-dev.html; then
+              break
+            fi
+            sleep 10
+          done
+          test -s /tmp/charmaker-dev.html
+          grep -qi '<div id="root"' /tmp/charmaker-dev.html
+        working-directory: .
+
+      - name: Install Chromium for visual verification
+        run: npx --yes playwright@latest install --with-deps chromium
+        working-directory: .
+
+      - name: Capture desktop screenshot
+        run: npx --yes playwright@latest screenshot --device="Desktop Chrome" --wait-for-timeout=3000 https://charmaker.free.nf/dev/ /tmp/charmaker-dev-desktop.png
+        working-directory: .
+
+      - name: Capture mobile screenshot
+        run: npx --yes playwright@latest screenshot --device="iPhone 13" --wait-for-timeout=3000 https://charmaker.free.nf/dev/ /tmp/charmaker-dev-mobile.png
+        working-directory: .
+
+      - name: Upload visual verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: charmaker-dev-screenshots
+          path: |
+            /tmp/charmaker-dev-desktop.png
+            /tmp/charmaker-dev-mobile.png
+          retention-days: 7
