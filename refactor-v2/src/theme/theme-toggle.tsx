@@ -13,14 +13,15 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
 
   if (compact) {
     const index = options.findIndex((option) => option.id === theme);
-    const next = options[(index + 1) % options.length];
-    const CurrentIcon = options[index]?.icon ?? Laptop;
+    const currentIndex = index >= 0 ? index : options.length - 1;
+    const next = options[(currentIndex + 1) % options.length] ?? options[0]!;
+    const CurrentIcon = options[currentIndex]?.icon ?? Laptop;
     return (
       <button
-        aria-label={`${options[index]?.label ?? 'Тема'}. Переключить на: ${next.label}`}
+        aria-label={`${options[currentIndex]?.label ?? 'Тема'}. Переключить на: ${next.label}`}
         className="focus-ring grid size-10 place-items-center rounded-xl border border-border bg-surface text-muted-foreground transition hover:bg-surface-strong hover:text-foreground"
         onClick={() => setTheme(next.id)}
-        title={options[index]?.label}
+        title={options[currentIndex]?.label}
         type="button"
       >
         <CurrentIcon className="size-4" />
