@@ -188,14 +188,19 @@ jobs:
         run: npx --yes playwright@latest install --with-deps chromium webkit
         working-directory: .
 
-      - name: Verify and capture desktop
+      - name: Verify and capture desktop Chrome
         continue-on-error: true
-        run: npx --yes playwright@latest screenshot --device="Desktop Chrome" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-desktop.png
+        run: npx --yes playwright@latest screenshot --browser=chromium --device="Desktop Chrome" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-desktop-chrome.png
         working-directory: .
 
-      - name: Verify and capture mobile
+      - name: Verify and capture iOS Safari profile
         continue-on-error: true
-        run: npx --yes playwright@latest screenshot --device="iPhone 13" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-mobile.png
+        run: npx --yes playwright@latest screenshot --browser=webkit --device="iPhone 13" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-ios-webkit.png
+        working-directory: .
+
+      - name: Verify and capture Android Chrome profile
+        continue-on-error: true
+        run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-android-chrome.png
         working-directory: .
 
       - name: Upload visual verification
@@ -205,8 +210,9 @@ jobs:
         with:
           name: charmaker-dev-screenshots
           path: |
-            /tmp/charmaker-dev-desktop.png
-            /tmp/charmaker-dev-mobile.png
+            /tmp/charmaker-dev-desktop-chrome.png
+            /tmp/charmaker-dev-ios-webkit.png
+            /tmp/charmaker-dev-android-chrome.png
           if-no-files-found: ignore
           retention-days: 7
 
