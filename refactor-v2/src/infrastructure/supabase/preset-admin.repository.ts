@@ -57,9 +57,15 @@ export async function savePreset(kind: PresetKind, payload: PresetPayload): Prom
   const token = requireAdminToken();
   const response = await callAdminApi<string>(token, 'upsert_preset', {
     p_kind: kind,
-    p_payload: payload,
+    p_payload: {
+      status: 'active',
+      is_public: true,
+      ...payload,
+    },
   });
-  if (typeof response.data !== 'string') throw new Error('Supabase не вернул ID сохраненного пресета.');
+  if (typeof response.data !== 'string' || !response.data.trim()) {
+    throw new Error('Supabase не вернул ID сохраненного пресета.');
+  }
   return response.data;
 }
 
