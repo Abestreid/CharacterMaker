@@ -12,6 +12,7 @@ on:
 permissions:
   contents: read
   statuses: write
+  issues: write
 
 concurrency:
   group: charactermaker-v2-dev
@@ -59,15 +60,19 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
+        id: dependencies
         run: npm install --no-audit --no-fund
 
       - name: Typecheck and tests
+        id: check
         run: npm run check
 
       - name: Production build
+        id: build
         run: npm run build
 
       - name: Add DEV metadata and noindex protection
+        id: metadata
         run: |
           python - <<'PY'
           import json
@@ -94,6 +99,7 @@ jobs:
           PY
 
       - name: Validate deploy target
+        id: validate
         run: |
           test "$DEPLOY_DIR" = "/htdocs/dev"
           test -f dist/index.html
@@ -101,10 +107,12 @@ jobs:
           test -d dist/assets
 
       - name: Install FTP client
+        id: ftp_client
         run: sudo apt-get update && sudo apt-get install -y lftp
         working-directory: .
 
       - name: Deploy DEV to InfinityFree
+        id: deploy
         env:
           FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
           FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME || secrets.FTP_USERNAME || secrets.FTP_USER }}
@@ -125,6 +133,7 @@ jobs:
           "
 
       - name: Verify deployed commit over FTP
+        id: verify_ftp
         working-directory: .
         env:
           FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
@@ -156,6 +165,7 @@ jobs:
           PY
 
       - name: HTTP smoke check
+        id: http
         run: |
           curl --fail --location --silent --show-error --max-time 30 \
             -H 'Cache-Control: no-cache' \
@@ -164,18 +174,22 @@ jobs:
         working-directory: .
 
       - name: Install browsers for mandatory visual verification
+        id: browsers
         run: npx --yes playwright@latest install --with-deps chromium webkit
         working-directory: .
 
       - name: Verify and capture desktop Chrome
+        id: desktop
         run: npx --yes playwright@latest screenshot --browser=chromium --device="Desktop Chrome" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-desktop-chrome.png
         working-directory: .
 
       - name: Verify and capture iOS Safari profile
+        id: ios
         run: npx --yes playwright@latest screenshot --browser=webkit --device="iPhone 13" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-ios-webkit.png
         working-directory: .
 
       - name: Verify and capture Android Chrome profile
+        id: android
         run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-android-chrome.png
         working-directory: .
 
@@ -191,6 +205,31 @@ jobs:
             /tmp/charmaker-dev-android-chrome.png
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: TEMP report exact deployment stage on failure
+        if: failure()
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > /tmp/deploy-stage.md <<EOF
+          Temporary deployment diagnostic for commit $GITHUB_SHA.
+
+          - dependencies: ${{ steps.dependencies.outcome }}
+          - check: ${{ steps.check.outcome }}
+          - build: ${{ steps.build.outcome }}
+          - metadata: ${{ steps.metadata.outcome }}
+          - validate: ${{ steps.validate.outcome }}
+          - ftp_client: ${{ steps.ftp_client.outcome }}
+          - deploy: ${{ steps.deploy.outcome }}
+          - verify_ftp: ${{ steps.verify_ftp.outcome }}
+          - http: ${{ steps.http.outcome }}
+          - browsers: ${{ steps.browsers.outcome }}
+          - desktop: ${{ steps.desktop.outcome }}
+          - ios: ${{ steps.ios.outcome }}
+          - android: ${{ steps.android.outcome }}
+          EOF
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "TEMP DEV deployment stage ${GITHUB_SHA:0:7}" --body-file /tmp/deploy-stage.md
 
       - name: Mark deployment success
         if: success()
