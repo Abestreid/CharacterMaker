@@ -1,31 +1,40 @@
 import { ChevronDown, Database, ImagePlus, LoaderCircle, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { deleteImageFromInfinityFree, uploadImageToInfinityFree, type MediaScope } from '../../infrastructure/media/infinityfree-media.repository';
-import { fetchPresetAssets, type PresetAsset } from '../../infrastructure/supabase/preset-assets.repository';
-import { attachInfinityFreeAsset, deleteAssetMetadata, deletePreset, savePreset, type PresetKind, type PresetPayload } from '../../infrastructure/supabase/preset.repository';
+import { characterMakerService } from '../../core/character-maker.service';
+import type { PresetAsset } from '../../infrastructure/supabase/preset-assets.repository';
+import type { PresetKind, ReferenceStatus } from '../../infrastructure/supabase/preset.repository';
 import type { PresetIdentity } from '../../infrastructure/supabase/preset-mappers';
+import type { StoredPresetState } from '../../infrastructure/supabase/preset-state.repository';
 import { Button, cn } from '../ui';
 
-type PresetListItem<TState> = {
+type PresetListItem = {
   id: string;
   slug: string;
   name: string;
   description: string | null;
-  metadata: Record<string, unknown> & { editor_state?: unknown };
-  editorState?: TState;
+  version: number;
 };
 
 type PresetManagerProps<TState> = {
   kind: PresetKind;
   label: string;
   state: TState;
-  loadPresets: () => Promise<Array<Omit<PresetListItem<TState>, 'editorState'>>>;
-  onLoad: (state: TState) => void;
-  toPayload: (identity: PresetIdentity, state: TState) => PresetPayload;
+  loadPresets: () => Promise<PresetListItem[]>;
+  loadState: (id: string) => Promise<StoredPresetState<TState>>;
+  saveState: (identity: PresetIdentity, state: TState) => Promise<string>;
+  onLoad: (state: TState, id: string) => void;
 };
 
-export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad, toPayload }: PresetManagerProps<TState>) {
-  const [presets, setPresets] = useState<PresetListItem<TState>[]>([]);
+const referenceStatusOptions: Array<{ id: ReferenceStatus; label: string }> = [
+  { id: 'normal', label: 'Обычный' },
+  { id: 'approved', label: 'Одобренный' },
+  { id: 'canonical', label: 'Канонический' },
+  { id: 'reference_only', label: 'Только референс' },
+  { id: 'rejected', label: 'Отклоненный' },
+];
+
+export function PresetManager<TState>({ kind, label, state, loadPresets, loadState, saveState, onLoad }: PresetManagerProps<TState>) {
+  const [presets, setPresets] = useState<PresetListItem[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [name, setName] = useState('');
   const [expanded, setExpanded] = useState(false);
@@ -35,17 +44,14 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
   const [assets, setAssets] = useState<PresetAsset[]>([]);
   const [assetRole, setAssetRole] = useState(() => roleOptions(kind)[0]?.id ?? 'reference');
   const [assetPrimary, setAssetPrimary] = useState(true);
+  const [assetReferenceStatus, setAssetReferenceStatus] = useState<ReferenceStatus>('normal');
 
   const selected = useMemo(() => presets.find((preset) => preset.id === selectedId) ?? null, [presets, selectedId]);
 
-  const refresh = useCallback(async (): Promise<PresetListItem<TState>[]> => {
+  const refresh = useCallback(async (): Promise<PresetListItem[]> => {
     const rows = await loadPresets();
-    const mapped = rows.map((row): PresetListItem<TState> => ({
-      ...row,
-      ...(isEditorState<TState>(row.metadata.editor_state) ? { editorState: row.metadata.editor_state } : {}),
-    }));
-    setPresets(mapped);
-    return mapped;
+    setPresets(rows);
+    return rows;
   }, [loadPresets]);
 
   const refreshAssets = useCallback(async () => {
@@ -53,7 +59,7 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
       setAssets([]);
       return;
     }
-    setAssets(await fetchPresetAssets(kind, selectedId));
+    setAssets(await characterMakerService.presets.assets(kind, selectedId));
   }, [kind, selectedId]);
 
   useEffect(() => {
@@ -82,7 +88,7 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
     }
   };
 
-  const ensurePresetVisible = async (id: string): Promise<PresetListItem<TState>> => {
+  const ensurePresetVisible = async (id: string): Promise<PresetListItem> => {
     for (const delay of [0, 250, 750]) {
       if (delay) await sleep(delay);
       const rows = await refresh();
@@ -100,19 +106,17 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
     setMessage('Введите название и нажмите «Создать пресет».');
   };
 
-  const loadSelected = () => {
-    setError(null);
-    setMessage(null);
-    if (!selected) return setError(`Выберите пресет «${label}».`);
-    if (!selected.editorState) return setError('У этого пресета нет совместимого снимка V2-редактора.');
-    onLoad(selected.editorState);
-    setMessage(`Пресет «${selected.name}» загружен в редактор.`);
-  };
+  const loadSelected = () => run(async () => {
+    if (!selected) throw new Error(`Выберите пресет «${label}».`);
+    const stored = await loadState(selected.id);
+    onLoad(stored.state, selected.id);
+    setMessage(`Пресет «${selected.name}» загружен из нормализованных данных БД (${stored.schemaVersion}).`);
+  });
 
   const saveNew = () => run(async () => {
     const cleanName = name.trim();
     if (!cleanName) throw new Error('Введите название пресета.');
-    const id = await savePreset(kind, toPayload({ name: cleanName, slug: createPresetSlug(kind) }, state));
+    const id = await saveState({ name: cleanName, slug: createPresetSlug(kind) }, state);
     const saved = await ensurePresetVisible(id);
     setSelectedId(saved.id);
     setName(saved.name);
@@ -123,22 +127,28 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
     if (!selected) throw new Error('Сначала выберите сохраненный пресет.');
     const cleanName = name.trim();
     if (!cleanName) throw new Error('Название пресета не может быть пустым.');
-    const id = await savePreset(kind, toPayload({ id: selected.id, name: cleanName, slug: selected.slug, description: selected.description }, state));
+    const id = await saveState({
+      id: selected.id,
+      name: cleanName,
+      slug: selected.slug,
+      description: selected.description,
+      expectedVersion: selected.version,
+    }, state);
     const saved = await ensurePresetVisible(id);
     setSelectedId(saved.id);
     setName(saved.name);
-    setMessage(`Пресет «${saved.name}» обновлен в общей публичной библиотеке.`);
+    setMessage(`Пресет «${saved.name}» обновлен. Версия: ${saved.version}.`);
   });
 
   const removeSelected = () => run(async () => {
     if (!selected) throw new Error('Сначала выберите сохраненный пресет.');
     if (!window.confirm(`Удалить пресет «${selected.name}» из общей публичной библиотеки?`)) return;
-    await deletePreset(kind, selected.id, false);
+    await characterMakerService.presets.archive(kind, selected.id);
     setSelectedId('');
     setName('');
     setAssets([]);
     await refresh();
-    setMessage(`Пресет «${selected.name}» удален из публичной библиотеки.`);
+    setMessage(`Пресет «${selected.name}» архивирован и скрыт из публичной библиотеки.`);
   });
 
   const uploadAsset = (event: ChangeEvent<HTMLInputElement>) => {
@@ -147,39 +157,30 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
     if (!file || !selected) return;
 
     void run(async () => {
-      const uploaded = await uploadImageToInfinityFree({
+      await characterMakerService.assets.upload({
         file,
-        scope: scopeForKind(kind),
-        entityId: selected.id,
+        kind,
+        ownerId: selected.id,
         role: assetRole,
+        isPrimary: assetPrimary,
+        referenceStatus: assetReferenceStatus,
       });
-      try {
-        await attachInfinityFreeAsset({
-          ownerKind: kind,
-          ownerId: selected.id,
-          role: assetRole,
-          objectPath: uploaded.objectPath,
-          publicUrl: uploaded.publicUrl,
-          fileName: uploaded.fileName,
-          mimeType: uploaded.mimeType,
-          sizeBytes: uploaded.sizeBytes,
-          isPrimary: assetPrimary,
-        });
-      } catch (reason: unknown) {
-        await deleteImageFromInfinityFree(uploaded.objectPath).catch(() => undefined);
-        throw reason;
-      }
       await refreshAssets();
-      setMessage(`Фото «${uploaded.fileName}» сохранено на InfinityFree и привязано к публичному пресету.`);
+      setMessage(`Фото «${file.name}» сохранено на InfinityFree и привязано к пресету.`);
     });
   };
 
   const removeAsset = (asset: PresetAsset) => run(async () => {
     if (!window.confirm(`Удалить фото «${asset.fileName ?? asset.role}»?`)) return;
-    if (asset.objectPath) await deleteImageFromInfinityFree(asset.objectPath);
-    await deleteAssetMetadata(asset.id);
+    await characterMakerService.assets.remove(asset);
     await refreshAssets();
     setMessage('Фото удалено с InfinityFree и из связей Supabase.');
+  });
+
+  const updateReferenceStatus = (asset: PresetAsset, referenceStatus: ReferenceStatus) => run(async () => {
+    await characterMakerService.assets.setReferenceStatus(asset.id, referenceStatus);
+    await refreshAssets();
+    setMessage('Статус референса обновлен.');
   });
 
   const roles = roleOptions(kind);
@@ -197,7 +198,7 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
           <span className="min-w-0 flex-1">
             <span className="block text-sm font-semibold text-foreground">Пресеты · {label}</span>
             <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-              {selected ? `Выбран: ${selected.name}` : presets.length ? `${presets.length} сохранено в общей библиотеке` : 'Сохраненных пресетов пока нет'}
+              {selected ? `Выбран: ${selected.name} · v${selected.version}` : presets.length ? `${presets.length} сохранено в общей библиотеке` : 'Сохраненных пресетов пока нет'}
             </span>
           </span>
           <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-180')} />
@@ -211,7 +212,7 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
       {expanded ? (
         <div className="mt-3 border-t border-border pt-3 sm:mt-4 sm:pt-4">
           <p className="mb-3 text-xs leading-5 text-muted-foreground">
-            Все пресеты сейчас сохраняются сразу в общей публичной библиотеке Supabase. Авторизация и приватные пресеты будут добавлены позже вместе с личными аккаунтами.
+            Текущий режим CharacterMaker - единая общая публичная библиотека без пользовательских аккаунтов. Все пресеты сохраняются непосредственно в Supabase.
           </p>
 
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
@@ -227,20 +228,20 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
                 value={selectedId}
               >
                 <option value="">Новый пресет...</option>
-                {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+                {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name} · v{preset.version}</option>)}
               </select>
             </label>
             <label className="space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">Название</span>
               <input className="focus-ring min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm text-foreground placeholder:text-muted-foreground" onChange={(event) => setName(event.target.value)} placeholder={`Например: ${label} 01`} value={name} />
             </label>
-            <div className="flex items-end"><Button className="w-full lg:w-auto" disabled={!selected || busy} onClick={loadSelected} variant="secondary">Загрузить</Button></div>
+            <div className="flex items-end"><Button className="w-full lg:w-auto" disabled={!selected || busy} onClick={() => void loadSelected()} variant="secondary">Загрузить</Button></div>
           </div>
 
           <div className="mt-3 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
-            <Button disabled={busy || Boolean(selected)} onClick={saveNew}><Save className="size-4" />Создать пресет</Button>
-            <Button disabled={!selected || busy} onClick={updateSelected} variant="secondary"><Save className="size-4" />Обновить выбранный</Button>
-            <Button disabled={!selected || busy} onClick={removeSelected} variant="danger"><Trash2 className="size-4" />Удалить</Button>
+            <Button disabled={busy || Boolean(selected)} onClick={() => void saveNew()}><Save className="size-4" />Создать пресет</Button>
+            <Button disabled={!selected || busy} onClick={() => void updateSelected()} variant="secondary"><Save className="size-4" />Обновить выбранный</Button>
+            <Button disabled={!selected || busy} onClick={() => void removeSelected()} variant="danger"><Trash2 className="size-4" />Удалить</Button>
           </div>
 
           {selected ? (
@@ -250,11 +251,17 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
                 <ChevronDown className="size-4 text-muted-foreground" />
               </summary>
               <div className="border-t border-border p-3">
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
                   <label className="space-y-1.5">
                     <span className="text-xs font-medium text-muted-foreground">Роль фото</span>
                     <select className="focus-ring min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm text-foreground" onChange={(event) => setAssetRole(event.target.value)} value={assetRole}>
                       {roles.map((role) => <option key={role.id} value={role.id}>{role.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">Статус для AI</span>
+                    <select className="focus-ring min-h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm text-foreground" onChange={(event) => setAssetReferenceStatus(event.target.value as ReferenceStatus)} value={assetReferenceStatus}>
+                      {referenceStatusOptions.map((status) => <option key={status.id} value={status.id}>{status.label}</option>)}
                     </select>
                   </label>
                   <label className="flex min-h-11 items-center gap-2 self-end rounded-xl border border-border bg-surface px-3 text-xs text-muted-foreground">
@@ -268,9 +275,14 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
                     {assets.map((asset) => (
                       <article className="overflow-hidden rounded-2xl border border-border bg-surface" key={asset.id}>
                         {asset.publicUrl ? <img alt={asset.fileName ?? asset.role} className="aspect-[4/3] w-full object-cover" loading="lazy" src={asset.publicUrl} /> : <div className="grid aspect-[4/3] place-items-center text-xs text-muted-foreground">Нет URL</div>}
-                        <div className="flex items-center justify-between gap-3 p-3">
-                          <div className="min-w-0"><p className="truncate text-xs font-medium text-foreground">{roles.find((role) => role.id === asset.role)?.label ?? asset.role}{asset.isPrimary ? ' · основное' : ''}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">{asset.fileName ?? asset.objectPath ?? asset.id}</p></div>
-                          <Button aria-label="Удалить фото" disabled={busy} onClick={() => void removeAsset(asset)} size="icon" variant="danger"><Trash2 className="size-4" /></Button>
+                        <div className="space-y-2 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0"><p className="truncate text-xs font-medium text-foreground">{roles.find((role) => role.id === asset.role)?.label ?? asset.role}{asset.isPrimary ? ' · основное' : ''}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">{asset.fileName ?? asset.objectPath ?? asset.id}</p></div>
+                            <Button aria-label="Удалить фото" disabled={busy} onClick={() => void removeAsset(asset)} size="icon" variant="danger"><Trash2 className="size-4" /></Button>
+                          </div>
+                          <select className="focus-ring min-h-10 w-full rounded-xl border border-border bg-background px-2 text-xs text-foreground" disabled={busy} onChange={(event) => void updateReferenceStatus(asset, event.target.value as ReferenceStatus)} value={asset.referenceStatus}>
+                            {referenceStatusOptions.map((status) => <option key={status.id} value={status.id}>{status.label}</option>)}
+                          </select>
                         </div>
                       </article>
                     ))}
@@ -281,7 +293,7 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
           ) : null}
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <Button disabled={busy} onClick={() => run(async () => { await refresh(); await refreshAssets(); })} size="sm" variant="ghost"><RefreshCw className="size-4" />Обновить библиотеку</Button>
+            <Button disabled={busy} onClick={() => void run(async () => { await refresh(); await refreshAssets(); })} size="sm" variant="ghost"><RefreshCw className="size-4" />Обновить библиотеку</Button>
             {busy ? <p className="flex items-center gap-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Выполняется...</p> : null}
           </div>
           {message ? <p className="mt-2 text-xs leading-5 text-emerald-500">{message}</p> : null}
@@ -294,12 +306,6 @@ export function PresetManager<TState>({ kind, label, state, loadPresets, onLoad,
 
 function createPresetSlug(kind: PresetKind): string {
   return `${kind}-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
-}
-
-function scopeForKind(kind: PresetKind): MediaScope {
-  if (kind === 'character') return 'characters';
-  if (kind === 'outfit') return 'outfits';
-  return 'scenes';
 }
 
 function roleOptions(kind: PresetKind): Array<{ id: string; label: string }> {
@@ -330,10 +336,6 @@ function roleOptions(kind: PresetKind): Array<{ id: string; label: string }> {
     { id: 'background_reference', label: 'Референс фона' },
     { id: 'style_reference', label: 'Референс стиля' },
   ];
-}
-
-function isEditorState<TState>(value: unknown): value is TState {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function errorMessage(reason: unknown): string {
