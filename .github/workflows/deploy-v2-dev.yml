@@ -123,15 +123,28 @@ jobs:
           dangerous-clean-slate: false
           log-level: standard
 
-      - name: Verify DEV URL
+      - name: Setup Chrome for browser verification
+        uses: browser-actions/setup-chrome@v2.1.2
+        with:
+          chrome-version: stable
+
+      - name: Verify DEV URL in real browser
         working-directory: .
         run: |
-          echo "DEPLOY_STAGE=http-verify" >> "$GITHUB_ENV"
-          curl --fail --location --silent --show-error \
-            --retry 5 --retry-delay 5 --retry-all-errors \
-            "$DEPLOY_URL" -o /tmp/charactermaker-dev.html
+          echo "DEPLOY_STAGE=browser-verify" >> "$GITHUB_ENV"
+          chrome --version
+          chrome \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --virtual-time-budget=15000 \
+            --dump-dom \
+            "$DEPLOY_URL" > /tmp/charactermaker-dev.html
+
           grep -q 'noindex,nofollow,noarchive' /tmp/charactermaker-dev.html
-          echo "DEV deployment verified: $DEPLOY_URL"
+          grep -q 'AI Character Maker V2' /tmp/charactermaker-dev.html || \
+            grep -q 'CharacterMaker' /tmp/charactermaker-dev.html
+          echo "DEV browser verification passed: $DEPLOY_URL"
 
       - name: Mark deployment success
         working-directory: .
@@ -141,7 +154,7 @@ jobs:
           payload=$(jq -n \
             --arg state success \
             --arg target_url "$DEPLOY_URL" \
-            --arg description "CharacterMaker V2 DEV deployed and verified" \
+            --arg description "CharacterMaker V2 DEV deployed and browser-verified" \
             --arg context "deployment/dev" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
