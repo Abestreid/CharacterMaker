@@ -28,7 +28,7 @@ Legacy-код в `main` используется только как источ�
 Текущая архитектура намеренно использует только уже выбранные бесплатные компоненты:
 
 - GitHub - код, история, документация, Actions;
-- Supabase Free - PostgreSQL, public REST/RPC и будущая MCP Edge Function;
+- Supabase Free - PostgreSQL, public REST/RPC и remote MCP Edge Function;
 - InfinityFree - Web DEV и физическое хранение изображений `/media/...`.
 
 Не используются:
@@ -59,29 +59,41 @@ Legacy-код в `main` используется только как источ�
 
 ## Единое ядро
 
-Web и будущий MCP не должны иметь отдельные бизнес-модели.
+Web и MCP не должны иметь отдельные несовместимые бизнес-модели.
 
-Основной прикладной facade:
+Основной прикладной facade Web:
 
 `src/core/character-maker.service.ts`
 
-MCP-ready context builder:
+Общий MCP-ready context builder:
 
 `src/core/context.service.ts`
 
-Web UI вызывает Core, Core работает с Supabase/InfinityFree. Будущий MCP должен вызывать те же domain types, mappers, loaders и context builder.
+Web и MCP работают с теми же Supabase entities, catalog IDs, normalized parameter tables, schema/version fields, AI context и asset relations.
 
 ```text
 React Web ---------+
                    |
                    v
-          CharacterMaker Core
+          CharacterMaker Core/Data
                    ^
                    |
-Future MCP --------+
+Remote MCP --------+
                    |
           Supabase + InfinityFree
 ```
+
+Remote MCP source:
+
+`supabase/functions/charactermaker-mcp/index.ts`
+
+Remote MCP endpoint:
+
+`https://kszybiwhchwekpmramxn.supabase.co/functions/v1/charactermaker-mcp`
+
+Подробности:
+
+`docs/MCP_ARCHITECTURE.md`
 
 ## Domain contract
 
@@ -112,7 +124,7 @@ Future MCP --------+
 - постоянные особенности;
 - отдельные татуировки.
 
-Все эти поля сохраняются в нормализованных parameter rows и доступны будущему MCP.
+Все эти поля сохраняются в нормализованных parameter rows и доступны MCP.
 
 ## Образы
 
@@ -127,11 +139,15 @@ Future MCP --------+
 - аксессуары;
 - дополнительное описание.
 
+Создание Образа и normalized parameter rows проверено транзакционно на живой БД с полным rollback после теста.
+
 ## Сцены и фоны
 
-UI продолжает использовать стабильный background slug из каталога.
+UI и MCP используют стабильный background slug из каталога.
 
-При сохранении RPC разрешает slug в настоящий `backgrounds.id`, поэтому `scene_presets.background_id` остается нормальной UUID relation и больше не существует двух независимых моделей фона.
+При сохранении/patch RPC разрешает slug в настоящий `backgrounds.id`, поэтому `scene_presets.background_id` остается нормальной UUID relation и больше не существует двух независимых моделей фона.
+
+Создание Сцены, reference flags и UUID background relation проверены транзакционно на живой БД с rollback и нулевыми остаточными test rows.
 
 ## Изображения
 
@@ -158,7 +174,9 @@ Asset status для AI/reference workflow:
 
 Временный Scene Data URL не записывается в localStorage.
 
-## AI context и MCP readiness
+MCP `get_asset` фактически проверен внешним GitHub runner и возвращает реальное изображение как MCP image content.
+
+## AI context и Generation Context
 
 Primary presets имеют `ai_context` JSONB. Он предназначен для:
 
@@ -169,9 +187,9 @@ Primary presets имеют `ai_context` JSONB. Он предназначен д�
 - avoid rules;
 - generation notes.
 
-Обычное Web-редактирование сохраняет существующий `ai_context`, чтобы будущие MCP-инструкции не терялись.
+Обычное Web-редактирование сохраняет существующий `ai_context`, чтобы MCP-инструкции не терялись.
 
-`context.service.ts` уже умеет собрать:
+`context.service.ts` и MCP `build_generation_context` собирают:
 
 ```text
 GenerationContext
@@ -186,15 +204,64 @@ GenerationContext
 
 `generation-context-v1`
 
-## Versioning, retry и audit
+## Full save, partial patch, retry и audit
+
+`public_upsert_preset` используется для полного save/create.
+
+`public_patch_preset` выполняет настоящий частичный update и не перезаписывает неуказанные поля/parameters.
 
 Основные пресеты имеют `version`.
 
 Update может передать `expected_version`, чтобы не затереть изменения, сделанные другим интерфейсом после загрузки.
 
-`public_upsert_preset` поддерживает `idempotency_key` для безопасных повторных запросов.
+Mutation RPC поддерживают idempotency, а изменения записываются в `audit_log`.
 
-Изменения записываются в `audit_log`.
+Partial patch проверен как транзакционно в PostgreSQL, так и end-to-end через опубликованный MCP endpoint.
+
+## MCP tools
+
+Read:
+
+- `search_presets`;
+- `get_preset`;
+- `get_catalog`;
+- `get_schema`;
+- `build_generation_context`;
+- `list_assets`;
+- `get_asset`.
+
+Write:
+
+- `create_character`;
+- `create_outfit`;
+- `create_scene`;
+- `patch_preset`;
+- `import_asset_from_url`;
+- `set_asset_reference_status`;
+- `archive_preset`.
+
+MCP не предоставляет hard delete.
+
+## MCP verification
+
+Постоянный workflow:
+
+`.github/workflows/mcp-smoke.yml`
+
+Он реально проверяет с внешнего GitHub runner:
+
+- health;
+- MCP initialize/initialized handshake;
+- tools/list;
+- чтение существующей Персоны;
+- чтение database catalog;
+- возврат реального изображения.
+
+Commit status:
+
+`mcp/smoke`
+
+Отдельный одноразовый write-validation успешно проверил create -> read -> partial patch -> read -> archive. После проверки fixture и test audit/idempotency данные были полностью удалены.
 
 ## Mobile-first UX
 
@@ -212,7 +279,11 @@ Update может передать `expected_version`, чтобы не зате�
 - desktop sidebar/sticky preview;
 - mobile Drawer и desktop Dialog для больших каталогов.
 
-DEV CI дополнительно снимает desktop и iPhone screenshot после deployment.
+DEV CI отдельно снимает:
+
+- Desktop Chrome;
+- iOS WebKit / iPhone 13;
+- Android Chrome / Pixel 5.
 
 ## Design system
 
@@ -223,9 +294,10 @@ components/presets   -> saved entity UI
 pages                -> route composition
 core                 -> shared application/context layer
 infrastructure       -> Supabase/InfinityFree adapters
+supabase/functions   -> remote MCP adapter
 ```
 
-Новая функциональность не должна обходить Core без технической причины.
+Новая функциональность не должна обходить общую domain/persistence модель без технической причины.
 
 ## Запуск
 
@@ -243,7 +315,7 @@ npm run build
 
 ## DEV deploy
 
-Push в `refactor/domain-catalog-v2` запускает GitHub Actions:
+Push в `refactor/domain-catalog-v2` по V2-файлам запускает GitHub Actions:
 
 1. install;
 2. TypeScript typecheck;
@@ -252,11 +324,20 @@ Push в `refactor/domain-catalog-v2` запускает GitHub Actions:
 5. FTPS deploy в `/htdocs/dev`;
 6. проверка remote `build-info.json` на точное совпадение commit SHA;
 7. HTTP smoke check;
-8. desktop и iPhone visual screenshots.
+8. Desktop Chrome, iOS WebKit и Android Chrome visual screenshots.
 
 DEV URL:
 
 `https://charmaker.free.nf/dev/`
+
+## Backup
+
+Перед Core/MCP correction package создано:
+
+- Git backup branch `backup/dev-2026-08-07-pre-core-mcp-fixes`;
+- Supabase snapshot schema `backup_20260807_1548`.
+
+Все 25 public table row counts были проверены 1:1 с backup.
 
 ## Документация и изменения
 
@@ -268,10 +349,14 @@ DEV URL:
 
 `docs/CHANGELOG.md`
 
+MCP:
+
+`docs/MCP_ARCHITECTURE.md`
+
 Supabase architecture:
 
 `supabase/README.md`
 
-Backup перед Core/MCP corrections:
+Backup:
 
 `docs/backups/2026-08-07-pre-core-mcp-fixes.md`
