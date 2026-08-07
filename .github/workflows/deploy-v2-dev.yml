@@ -155,27 +155,7 @@ jobs:
           print(f'VERIFIED_REMOTE_COMMIT={actual}')
           PY
 
-      - name: Mark deployment success
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          payload=$(jq -n \
-            --arg state success \
-            --arg target_url "$DEPLOY_URL" \
-            --arg description "V2 DEV deployed; remote FTP manifest matches commit" \
-            --arg context "deployment/dev" \
-            '{state:$state,target_url:$target_url,description:$description,context:$context}')
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "$payload" >/dev/null
-
       - name: HTTP smoke check
-        continue-on-error: true
         run: |
           curl --fail --location --silent --show-error --max-time 30 \
             -H 'Cache-Control: no-cache' \
@@ -183,23 +163,19 @@ jobs:
           test -s /tmp/charmaker-dev.html
         working-directory: .
 
-      - name: Install browsers for visual verification
-        continue-on-error: true
+      - name: Install browsers for mandatory visual verification
         run: npx --yes playwright@latest install --with-deps chromium webkit
         working-directory: .
 
       - name: Verify and capture desktop Chrome
-        continue-on-error: true
         run: npx --yes playwright@latest screenshot --browser=chromium --device="Desktop Chrome" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-desktop-chrome.png
         working-directory: .
 
       - name: Verify and capture iOS Safari profile
-        continue-on-error: true
         run: npx --yes playwright@latest screenshot --browser=webkit --device="iPhone 13" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-ios-webkit.png
         working-directory: .
 
       - name: Verify and capture Android Chrome profile
-        continue-on-error: true
         run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-android-chrome.png
         working-directory: .
 
@@ -216,6 +192,26 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Mark deployment success
+        if: success()
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state success \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "V2 DEV deployed and verified on desktop, iOS WebKit and Android Chrome" \
+            --arg context "deployment/dev" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
+
       - name: Mark deployment failure
         if: failure()
         working-directory: .
@@ -225,7 +221,7 @@ jobs:
           payload=$(jq -n \
             --arg state failure \
             --arg target_url "$DEPLOY_URL" \
-            --arg description "V2 DEV deploy failed before remote commit verification" \
+            --arg description "V2 DEV build/deploy/device verification failed" \
             --arg context "deployment/dev" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
