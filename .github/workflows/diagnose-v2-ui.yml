@@ -27,18 +27,31 @@ jobs:
           node-version: '22'
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-      - name: Run check and report exact failure
+      - name: Run check and build and report result
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set +e
-          npm run check 2>&1 | tee /tmp/v2-check.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            tail -n 120 /tmp/v2-check.log > /tmp/v2-check-tail.log
-            gh issue create \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "TEMP V2 UI diagnostic ${GITHUB_SHA:0:7}" \
-              --body-file /tmp/v2-check-tail.log
-            exit "$status"
+          {
+            echo '=== npm run check ==='
+            npm run check
+            check_status=$?
+            echo "CHECK_STATUS=$check_status"
+            if [ "$check_status" -eq 0 ]; then
+              echo '=== npm run build ==='
+              npm run build
+              build_status=$?
+            else
+              build_status=99
+            fi
+            echo "BUILD_STATUS=$build_status"
+          } 2>&1 | tee /tmp/v2-diagnostic.log
+          check_status=$(grep '^CHECK_STATUS=' /tmp/v2-diagnostic.log | tail -1 | cut -d= -f2)
+          build_status=$(grep '^BUILD_STATUS=' /tmp/v2-diagnostic.log | tail -1 | cut -d= -f2)
+          tail -n 160 /tmp/v2-diagnostic.log > /tmp/v2-diagnostic-tail.log
+          if [ "$check_status" = "0" ] && [ "$build_status" = "0" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "TEMP V2 UI diagnostic SUCCESS ${GITHUB_SHA:0:7}" --body-file /tmp/v2-diagnostic-tail.log
+            exit 0
           fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "TEMP V2 UI diagnostic FAILED ${GITHUB_SHA:0:7}" --body-file /tmp/v2-diagnostic-tail.log
+          exit 1
