@@ -62,7 +62,7 @@ export function characterStateToPreset(identity: PresetIdentity, state: Characte
     hips_cm: state.body.hips,
     body_fat_percent: state.body.bodyFat,
     parameters,
-    metadata: { editor_schema: 'character-state-v2' },
+    metadata: { editor_schema: 'character-state-v2', editor_state: state },
   };
 }
 
@@ -87,6 +87,7 @@ export function wardrobeStateToOutfitPreset(identity: PresetIdentity, state: War
     parameters,
     metadata: {
       editor_schema: 'wardrobe-state-v2',
+      editor_state: state,
       layer_positions: ['base_layer', 'top', 'bottom', 'outerwear', 'footwear'],
     },
   };
@@ -120,6 +121,7 @@ export function sceneStateToPreset(identity: PresetIdentity, state: SceneState):
     parameters,
     metadata: {
       editor_schema: 'scene-state-v2',
+      editor_state: state,
       character_mode: state.character.mode,
       use_clothing_from_reference: state.reference.useClothing,
       use_expression_from_reference: state.reference.useExpression,
