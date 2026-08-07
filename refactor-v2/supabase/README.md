@@ -23,6 +23,7 @@ All active presets are intentionally stored in one shared public library at this
 
 - V2 branch: `refactor/domain-catalog-v2`.
 - Supabase PostgreSQL stores structured data, catalogs, metadata and relations.
+- Supabase Edge Functions host the CharacterMaker remote MCP inside the same free project.
 - Supabase Storage is not used.
 - Cloudflare/R2 is not used.
 - Images are physically stored on InfinityFree under `/media/...`.
@@ -37,51 +38,95 @@ Browser reads use Supabase public tables protected by read RLS policies.
 
 Preset writes use explicit public `SECURITY DEFINER` RPCs:
 
-- `public_upsert_preset`
-- `public_delete_preset`
-- `public_attach_asset`
-- `public_delete_asset`
-- `public_set_character_outfit`
-- `public_set_asset_reference_status`
+- `public_upsert_preset` - complete entity save used by the Web editor and MCP create tools;
+- `public_patch_preset` - true partial update for MCP and future partial Web actions;
+- `public_delete_preset` - archive/hard-delete primitive; MCP only exposes archive;
+- `public_attach_asset`;
+- `public_delete_asset`;
+- `public_set_character_outfit`;
+- `public_set_asset_reference_status`.
 
 This is a deliberate temporary architecture for the personal/public phase. When user accounts are introduced later, ownership/private/public RLS must be designed as a separate migration instead of silently changing current behavior.
 
-The old `admin-presets` Edge Function is deprecated and is not part of the active mutation flow. Old documentation describing an admin editing key must not be used as current architecture.
+Security Advisor warnings about anonymous execution of public mutation `SECURITY DEFINER` functions are expected under this explicitly selected no-account model. They must not be "fixed" by introducing roles/authentication without a product decision.
+
+The old `admin-presets` Edge Function is deprecated, returns 410 Gone and is not part of the active mutation flow. The old `admin_validate_token` database RPC has been removed.
 
 ## Shared Core contract
 
-Web UI and the future MCP must use the same CharacterMaker application/domain layer.
+Web UI and MCP use the same persisted entities, stable catalog IDs, normalized parameter tables, schema versions, asset roles/statuses and mutation RPCs.
 
-Current shared application facade:
+Web application facade:
 
 `src/core/character-maker.service.ts`
 
-It is responsible for the same operations that future MCP tools will call:
+Web/MCP context contract:
 
-- list/load/save Persona;
-- list/load/save Outfit;
-- list/load/save Scene;
-- catalogs;
-- preset assets;
-- media upload/delete;
-- reference status.
+`src/core/context.service.ts`
 
-The Web UI must not create an independent business model for MCP.
+Remote MCP source:
+
+`supabase/functions/charactermaker-mcp/index.ts`
+
+The Web UI must not create an independent persistence model from MCP.
+
+## CharacterMaker MCP Edge Function
+
+Function slug:
+
+`charactermaker-mcp`
+
+Remote endpoint:
+
+`https://kszybiwhchwekpmramxn.supabase.co/functions/v1/charactermaker-mcp`
+
+Health endpoint:
+
+`https://kszybiwhchwekpmramxn.supabase.co/functions/v1/charactermaker-mcp/health`
+
+Current auth mode:
+
+`verify_jwt=false`
+
+This is intentional for the current public/no-account product phase.
+
+The MCP exposes read/write operations for:
+
+- search and complete Persona/Outfit/Scene retrieval;
+- catalogs and current schema;
+- generation context assembly;
+- create and partial patch;
+- asset listing/read/image content;
+- public-image URL import to InfinityFree;
+- canonical/reference status;
+- soft archive.
+
+Full MCP documentation:
+
+`docs/MCP_ARCHITECTURE.md`
+
+External protocol verification:
+
+`.github/workflows/mcp-smoke.yml`
+
+The smoke workflow has successfully verified health, initialize/initialized handshake, tools/list, real database reads, catalog reads and actual image content from an external GitHub runner.
+
+A separate one-time validation successfully verified create -> read -> partial patch -> read -> archive through the published MCP endpoint. The temporary fixture and its test audit/idempotency data were removed after the successful test.
 
 ## Catalog system
 
 Core tables:
 
-- `catalogs`
-- `catalog_categories`
-- `catalog_options`
+- `catalogs`;
+- `catalog_categories`;
+- `catalog_options`.
 
 Normalized preset values:
 
-- `character_parameter_values`
-- `outfit_preset_parameter_values`
-- `background_parameter_values`
-- `scene_preset_parameter_values`
+- `character_parameter_values`;
+- `outfit_preset_parameter_values`;
+- `background_parameter_values`;
+- `scene_preset_parameter_values`.
 
 Current control totals after synchronization:
 
@@ -154,6 +199,8 @@ Additional Core/MCP columns:
 - `version`;
 - `ai_context`.
 
+Transactional persistence validation on 2026-08-07 confirmed creation plus normalized parameter rows; the test transaction was rolled back and left zero test rows.
+
 ## Scene
 
 Primary table: `scene_presets`  
@@ -179,7 +226,7 @@ A Scene stores:
 - filter;
 - reference behavior.
 
-`scene_presets.background_id` is the real UUID relation to `backgrounds`. The editor continues to use the stable background slug/catalog id. `public_upsert_preset` resolves `background_slug` to the corresponding `backgrounds.id`, so the editor and relational model no longer represent two unrelated background systems.
+`scene_presets.background_id` is the real UUID relation to `backgrounds`. The editor and MCP use the stable background slug/catalog ID. `public_upsert_preset` and `public_patch_preset` resolve `background_slug` to the corresponding `backgrounds.id`.
 
 Reference behavior is stored in normal columns:
 
@@ -187,6 +234,8 @@ Reference behavior is stored in normal columns:
 - `reference_use_expression`.
 
 Temporary browser Data URLs are not persisted to Supabase and are excluded from Zustand local persistence.
+
+Transactional persistence validation on 2026-08-07 confirmed Scene creation, normalized parameter rows, `scene-state-v3`, reference flags and a real UUID relation resolving back to `professional_white_cyclorama`; rollback left zero test rows/keys.
 
 ## Assets and InfinityFree
 
@@ -222,40 +271,57 @@ Assets have `reference_status`:
 - `rejected`;
 - `reference_only`.
 
-This is the basis for distinguishing ordinary generations/references from identity-defining canonical images in MCP/AI workflows.
+MCP `get_asset` has been externally validated to return an actual image as MCP image content.
 
 ## Preset loading
 
-`metadata.editor_state` remains a convenient snapshot/cache but is no longer the source required to restore a preset.
+`metadata.editor_state` remains a convenient snapshot/cache but is no longer required to restore a preset.
 
-Current loading reconstructs editor state from:
+Current Web loading reconstructs editor state from:
 
 1. primary entity columns;
 2. normalized `*_parameter_values` rows;
 3. relational background data where needed;
 4. normal Scene reference flags.
 
-This allows Web and future MCP clients to use the same database state even when an old preset does not contain a compatible editor snapshot.
+MCP independently reads the same normalized database state and resolves catalog labels from the same live catalog tables.
 
-## Versioning and mutation safety
+## Full save vs partial patch
+
+`public_upsert_preset` is intended for a complete editor save/create.
+
+`public_patch_preset` changes only fields and parameter rows supplied in the patch. This is required for conversational operations such as changing only `eye_color` without resending every Persona characteristic.
+
+Partial patch supports:
+
+- optional top-level fields;
+- normalized parameter upsert;
+- normalized parameter delete;
+- `expected_version` conflict detection;
+- idempotency key;
+- audit `mutation_source`.
+
+A real transactional database test changed an existing Persona eye color and version and then rolled back successfully, confirming no residual test data.
+
+## Versioning, idempotency and audit
 
 Primary presets contain integer `version` fields.
 
 Updates may send `expected_version`. If the stored version changed since it was loaded, the RPC raises a version conflict instead of silently overwriting a newer update.
 
-`public_upsert_preset` also supports `idempotency_key`. Processed keys are recorded in `mutation_requests` so retrying the same create/save request can return the original result.
+Processed retry keys are recorded in `mutation_requests`.
 
-`audit_log` records mutation actions and entity IDs for debugging and future MCP traceability.
+`audit_log` records mutation source/action/entity for Web/MCP debugging.
 
 ## Generations
 
 Tables:
 
-- `generations`
-- `generation_sources`
-- `generation_assets`
+- `generations`;
+- `generation_sources`;
+- `generation_assets`.
 
-The existing schema already supports provenance links from a generation to:
+The existing schema supports provenance links from a generation to:
 
 - Persona;
 - Outfit;
@@ -263,7 +329,7 @@ The existing schema already supports provenance links from a generation to:
 - Background;
 - reference assets.
 
-The V2 Results UI currently represents images only. Generation-provider integration is a later layer and must use the shared Core context rather than legacy Gemini-specific state.
+The V2 Results UI currently represents images only. Generation-provider integration is a later layer and must consume the shared generation-context contract rather than legacy Gemini-specific state.
 
 ## Backups
 
@@ -276,19 +342,20 @@ See `docs/backups/2026-08-07-pre-core-mcp-fixes.md`.
 
 ## Migrations in Git
 
-All new schema changes must have a corresponding SQL file under:
+All schema changes must have a corresponding SQL file under `supabase/migrations/`.
 
-`supabase/migrations/`
+Current correction migrations:
 
-The Core/MCP readiness migration is recorded as:
-
-`supabase/migrations/202608071600_core_mcp_readiness.sql`
+- `202608071600_core_mcp_readiness.sql`;
+- `202608071635_remove_deprecated_admin_token_rpc.sql`;
+- `202608071650_add_public_patch_preset.sql`.
 
 ## Deprecated artifacts
 
 The following are historical and not active architecture:
 
 - old `admin-presets` editing-key flow;
+- old `admin_validate_token` RPC;
 - empty Supabase Storage buckets from the discarded storage design;
 - Cloudflare R2/S3 proposal;
 - video-related schema/UI assumptions.
