@@ -30,22 +30,26 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className="grid grid-cols-3 gap-1 rounded-2xl border border-border bg-surface p-1" aria-label="Цветовая тема">
-      {options.map(({ id, label, icon: Icon }) => (
-        <button
-          aria-pressed={theme === id}
-          className={cn(
-            'focus-ring flex min-h-10 items-center justify-center gap-2 rounded-xl px-3 text-xs font-medium transition',
-            theme === id ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-surface-strong hover:text-foreground',
-          )}
-          key={id}
-          onClick={() => setTheme(id)}
-          type="button"
-        >
-          <Icon className="size-4" />
-          <span className="hidden xl:inline">{label.replace(' тема', '')}</span>
-        </button>
-      ))}
+    <div className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-background/55 px-2" aria-label="Цветовая тема">
+      <span className="min-w-0 flex-1 text-xs font-medium text-muted-foreground">Тема</span>
+      <div className="flex items-center gap-1">
+        {options.map(({ id, label, icon: Icon }) => (
+          <button
+            aria-label={label}
+            aria-pressed={theme === id}
+            className={cn(
+              'focus-ring grid size-8 place-items-center rounded-lg transition',
+              theme === id ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-surface-strong hover:text-foreground',
+            )}
+            key={id}
+            onClick={() => setTheme(id)}
+            title={label}
+            type="button"
+          >
+            <Icon className="size-3.5" />
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
