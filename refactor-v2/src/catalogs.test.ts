@@ -7,6 +7,7 @@ import {
   BOTTOM_TYPES,
   BREAST_FIRMNESS_OPTIONS,
   BREAST_SHAPES,
+  BREAST_SIZE_OPTIONS,
   BUTTOCK_FIRMNESS_OPTIONS,
   BUTTOCK_SHAPES,
   CHARACTER_ORIENTATIONS,
@@ -57,6 +58,7 @@ import {
 const expectedCounts: Array<[string, readonly { id: string; label: string }[], number]> = [
   ['GENDERS', GENDERS, 2],
   ['MUSCLE_MASS_OPTIONS', MUSCLE_MASS_OPTIONS, 4],
+  ['BREAST_SIZE_OPTIONS', BREAST_SIZE_OPTIONS, 4],
   ['BREAST_SHAPES', BREAST_SHAPES, 11],
   ['BREAST_FIRMNESS_OPTIONS', BREAST_FIRMNESS_OPTIONS, 4],
   ['BUTTOCK_SHAPES', BUTTOCK_SHAPES, 4],
@@ -112,5 +114,9 @@ describe('catalog integrity', () => {
   it.each(expectedCounts)('%s contains expected values', (name, options, expected) => {
     expect(options).toHaveLength(expected);
     expect(() => validateUniqueIds(name, options)).not.toThrow();
+  });
+
+  it('contains 584 option values in the local fallback', () => {
+    expect(expectedCounts.reduce((sum, [, options]) => sum + options.length, 0)).toBe(584);
   });
 });
