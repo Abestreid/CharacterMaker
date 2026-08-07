@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: charactermaker-v2-prod
@@ -22,7 +23,7 @@ env:
 
 jobs:
   build-test-deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message != 'ci: configure V2 production deployment'
+    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip-prod-deploy]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -33,6 +34,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Mark deployment pending
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state pending \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "CharacterMaker V2 PROD deployment in progress" \
+            --arg context "deployment/prod" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -75,9 +95,8 @@ jobs:
           test -n "$FTP_USERNAME"
           test -n "$FTP_PASSWORD"
 
-          # Intentionally no --delete here: /htdocs/dev must never be removed
-          # by production deployment. Current production files are overwritten,
-          # while DEV remains isolated in /htdocs/dev.
+          # Deliberately no --delete here: /htdocs/dev must never be removed
+          # by a production deployment.
           lftp <<EOF
           set cmd:fail-exit yes
           set ftp:ssl-force true
@@ -102,3 +121,42 @@ jobs:
             exit 1
           fi
           echo "PROD deployment verified: $DEPLOY_URL"
+
+      - name: Mark deployment success
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state success \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "CharacterMaker V2 PROD deployed and verified" \
+            --arg context "deployment/prod" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
+
+      - name: Mark deployment failure
+        if: failure()
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state failure \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "CharacterMaker V2 PROD deployment failed" \
+            --arg context "deployment/prod" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
