@@ -1,6 +1,6 @@
 import { supabase } from './client';
 import { fetchPublicAssets, type PublicAsset } from './library.repository';
-import type { PresetKind } from './preset-admin.repository';
+import type { PresetKind } from './preset.repository';
 
 export type PresetAsset = PublicAsset & {
   role: string;
