@@ -2,6 +2,19 @@ import { supabase } from './client';
 
 export type PresetKind = 'character' | 'outfit' | 'scene';
 export type AssetOwnerKind = PresetKind | 'background' | 'generation';
+export type ReferenceStatus = 'normal' | 'approved' | 'canonical' | 'rejected' | 'reference_only';
+
+export type AiContext = {
+  summary?: string;
+  canonicalDescription?: string;
+  identityInstructions?: string;
+  mustPreserve?: string[];
+  mayVary?: string[];
+  avoid?: string[];
+  generationNotes?: string[];
+  schemaVersion?: string;
+  [key: string]: unknown;
+};
 
 export type ParameterValueInput = {
   catalog_id: string;
@@ -20,6 +33,10 @@ export type PresetPayload = {
   description?: string | null;
   parameters?: ParameterValueInput[];
   metadata?: Record<string, unknown>;
+  schema_version?: string;
+  ai_context?: AiContext;
+  expected_version?: number;
+  idempotency_key?: string;
   age?: number | null;
   height_cm?: number | null;
   weight_kg?: number | null;
@@ -31,8 +48,11 @@ export type PresetPayload = {
   category?: string | null;
   suggested_background_id?: string | null;
   background_id?: string | null;
+  background_slug?: string | null;
   custom_background_text?: string | null;
   prompt_text?: string | null;
+  reference_use_clothing?: boolean;
+  reference_use_expression?: boolean;
 };
 
 export type AttachAssetInput = {
@@ -47,13 +67,18 @@ export type AttachAssetInput = {
   width?: number | null;
   height?: number | null;
   isPrimary?: boolean;
+  referenceStatus?: ReferenceStatus;
   metadata?: Record<string, unknown>;
 };
 
 export async function savePreset(kind: PresetKind, payload: PresetPayload): Promise<string> {
+  const requestPayload: PresetPayload = {
+    ...payload,
+    idempotency_key: payload.idempotency_key ?? crypto.randomUUID(),
+  };
   const { data, error } = await supabase.rpc('public_upsert_preset', {
     p_kind: kind,
-    p_payload: payload,
+    p_payload: requestPayload,
   });
   if (error) throw error;
   if (typeof data !== 'string' || !data.trim()) throw new Error('Supabase не вернул ID сохраненного пресета.');
@@ -83,11 +108,23 @@ export async function attachInfinityFreeAsset(input: AttachAssetInput): Promise<
     p_width: input.width ?? null,
     p_height: input.height ?? null,
     p_is_primary: input.isPrimary ?? false,
-    p_metadata: input.metadata ?? {},
+    p_metadata: {
+      ...(input.metadata ?? {}),
+      reference_status: input.referenceStatus ?? 'normal',
+    },
   });
   if (error) throw error;
   if (typeof data !== 'string') throw new Error('Supabase не вернул ID файла.');
   return data;
+}
+
+export async function setAssetReferenceStatus(assetId: string, referenceStatus: ReferenceStatus): Promise<boolean> {
+  const { data, error } = await supabase.rpc('public_set_asset_reference_status', {
+    p_asset_id: assetId,
+    p_reference_status: referenceStatus,
+  });
+  if (error) throw error;
+  return data === true;
 }
 
 export async function deleteAssetMetadata(assetId: string): Promise<boolean> {
