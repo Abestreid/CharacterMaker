@@ -1,0 +1,117 @@
+name: Deploy CharacterMaker V2 DEV
+
+on:
+  push:
+    branches:
+      - refactor/domain-catalog-v2
+    paths:
+      - 'refactor-v2/**'
+      - '.github/workflows/deploy-v2-dev.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: charactermaker-v2-dev
+  cancel-in-progress: true
+
+env:
+  APP_DIR: refactor-v2
+  DEPLOY_DIR: /htdocs/dev
+  DEPLOY_URL: https://charmaker.free.nf/dev/
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: refactor-v2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: refactor-v2/package-lock.json
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck and tests
+        run: npm run check
+
+      - name: Production build
+        run: npm run build
+
+      - name: Add DEV noindex protection
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          index = Path('dist/index.html')
+          html = index.read_text(encoding='utf-8')
+          tag = '<meta name="robots" content="noindex,nofollow,noarchive" />'
+          if tag not in html:
+              if '</head>' not in html:
+                  raise SystemExit('Cannot inject robots meta: </head> not found')
+              html = html.replace('</head>', f'  {tag}\n</head>', 1)
+              index.write_text(html, encoding='utf-8')
+
+          Path('dist/robots.txt').write_text(
+              'User-agent: *\nDisallow: /\n',
+              encoding='utf-8',
+          )
+          PY
+
+      - name: Validate deploy target
+        run: |
+          test "$DEPLOY_DIR" = "/htdocs/dev" || {
+            echo "Unsafe DEV deploy path: $DEPLOY_DIR"
+            exit 1
+          }
+          test -f dist/index.html
+          test -d dist/assets
+
+      - name: Install FTPS client
+        working-directory: .
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+
+      - name: Deploy DEV over FTPS Explicit TLS
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          test -n "$FTP_SERVER"
+          test -n "$FTP_USERNAME"
+          test -n "$FTP_PASSWORD"
+
+          lftp <<EOF
+          set cmd:fail-exit yes
+          set ftp:ssl-force true
+          set ftp:ssl-protect-data true
+          set ftp:passive-mode true
+          set ssl:verify-certificate no
+          set net:max-retries 3
+          set net:timeout 25
+          open -p 21 -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER"
+          mkdir -p $DEPLOY_DIR
+          mirror --reverse --delete --verbose --parallel=2 dist $DEPLOY_DIR
+          bye
+          EOF
+
+      - name: Verify DEV URL
+        working-directory: .
+        run: |
+          curl --fail --location --silent --show-error \
+            --retry 5 --retry-delay 5 --retry-all-errors \
+            "$DEPLOY_URL" -o /tmp/charactermaker-dev.html
+          grep -q 'noindex,nofollow,noarchive' /tmp/charactermaker-dev.html
+          echo "DEV deployment verified: $DEPLOY_URL"
