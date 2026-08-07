@@ -4,6 +4,19 @@
 
 ## 2026-08-07
 
+### Original CharacterMaker character presets imported into Supabase
+
+- исходный массив `PRESETS` взят из `main:src/constants/character/presets.ts`, blob `5a716f8aa8e0b0bdfb0f7464063fd466a06561ef`;
+- в Supabase через штатный `public_upsert_preset('character', payload)` импортированы 13 отсутствовавших оригинальных Персон;
+- существующая актуализированная Лайвет `laivet` намеренно не перезаписывалась старым legacy-профилем;
+- после импорта публичная библиотека содержит ровно 14 active/public Персон - полный оригинальный набор имен;
+- все новые записи приведены к `character-state-v3`, имеют `metadata.editor_state` и нормализованные `character_parameter_values`;
+- `breastSizeId` оставлен `null`, поскольку такого параметра не было в оригинальном проекте;
+- скрытые женские поля старых мужских профилей не перенесены в активный V2 state;
+- опечатка Наны `Крылая` нормализована в `winged`, возраст Эльфийского Рейнджера `125` сохранен как в оригинале;
+- legacy `clothingPreset` сохранен в import metadata, но отдельные Образы на этом шаге не создавались;
+- подробная запись: `docs/changes/2026-08-07-import-original-character-presets.md`.
+
 ### Preset workspace UI, live preview and DEV stabilization
 
 - перед UI-refactor создана backup-ветка `backup/pre-ui-preset-manager-20260807`;
