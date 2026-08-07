@@ -6,6 +6,7 @@ import {
   BOTTOM_TYPES,
   BREAST_FIRMNESS_OPTIONS,
   BREAST_SHAPES,
+  BREAST_SIZE_OPTIONS,
   BUTTOCK_FIRMNESS_OPTIONS,
   BUTTOCK_SHAPES,
   CHARACTER_ORIENTATIONS,
@@ -58,6 +59,7 @@ export function validateCharacterState(state: CharacterState): void {
   const checks: Array<[string, boolean]> = [
     ['identity.genderId', hasOption(GENDERS, state.identity.genderId)],
     ['body.muscleMassId', hasOption(MUSCLE_MASS_OPTIONS, state.body.muscleMassId)],
+    ['body.breastSizeId', hasOption(BREAST_SIZE_OPTIONS, state.body.breastSizeId)],
     ['body.breastShapeId', hasOption(BREAST_SHAPES, state.body.breastShapeId)],
     ['body.breastFirmnessId', hasOption(BREAST_FIRMNESS_OPTIONS, state.body.breastFirmnessId)],
     ['body.buttockShapeId', hasOption(BUTTOCK_SHAPES, state.body.buttockShapeId)],
