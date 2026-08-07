@@ -107,6 +107,29 @@ Desktop shell приведен к рабочей сетке для широко�
 
 Функциональность темы сохранена полностью, переполнение sidebar устранено.
 
+### 8. Проверка сохранения существующих пресетов
+
+Во время обязательной CI-проверки обнаружено рассогласование между существующим контрактом `WEB_PARTIAL_UPDATE_RULES.md`, регрессионными тестами и фактическим Core: тесты ожидали `buildStatePatch`, а текущий Core его не предоставлял.
+
+Исправлена фактическая реализация без изменения модели данных:
+
+- восстановлен `public_patch_preset` client в `preset.repository.ts`;
+- существующий пресет перед сохранением перечитывается из нормализованного Supabase state;
+- Web отправляет только реально измененные top-level поля и normalized parameters;
+- неизмененные UI fallback/default значения не превращаются в сохраненные факты;
+- удаленные normalized значения передаются как delete patch;
+- переход Персоны female -> male удаляет несовместимые female-only параметры;
+- изменение background Сцены синхронно обновляет `background_slug` и normalized `background`;
+- сохраняется optimistic version check и существующий `ai_context`.
+
+Финальная отдельная проверка подтвердила:
+
+- TypeScript typecheck - успешно;
+- Vitest - 3 test files, 60/60 tests успешно;
+- production Vite build - успешно.
+
+Временный диагностический workflow после проверки удален, временные diagnostic issues закрыты.
+
 ## Что не менялось
 
 - Supabase schema;
@@ -119,4 +142,4 @@ Desktop shell приведен к рабочей сетке для широко�
 - поля Сцены;
 - deployment architecture.
 
-Изменение является frontend/UX refactor без миграций БД.
+Изменение является frontend/UX refactor и восстановлением уже документированного Web partial-update контракта без миграций БД.
