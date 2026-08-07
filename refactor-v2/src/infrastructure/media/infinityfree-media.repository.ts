@@ -6,6 +6,8 @@ export type UploadedMedia = {
   fileName: string;
   mimeType: string;
   sizeBytes: number;
+  width: number | null;
+  height: number | null;
 };
 
 function mediaApiUrl(): string {
@@ -40,6 +42,8 @@ export async function uploadImageToInfinityFree(input: {
     fileName: payload.fileName,
     mimeType: payload.mimeType,
     sizeBytes: payload.sizeBytes,
+    width: typeof payload.width === 'number' ? payload.width : null,
+    height: typeof payload.height === 'number' ? payload.height : null,
   };
 }
 
