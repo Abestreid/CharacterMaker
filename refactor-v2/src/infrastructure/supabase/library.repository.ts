@@ -1,6 +1,6 @@
 import { supabase } from './client';
 
-export type PublicCharacter = {
+export type PublicCharacterPreset = {
   id: string;
   slug: string;
   name: string;
@@ -14,13 +14,14 @@ export type PublicCharacter = {
   bodyFatPercent: number | null;
 };
 
-export type PublicWardrobeItem = {
+export type PublicOutfitPreset = {
   id: string;
   slug: string;
   name: string;
   description: string | null;
-  itemKind: string;
-  primaryLayer: string | null;
+  category: string | null;
+  suggestedBackgroundId: string | null;
+  promptText: string | null;
 };
 
 export type PublicBackground = {
@@ -31,7 +32,27 @@ export type PublicBackground = {
   promptText: string | null;
 };
 
-export async function fetchPublicCharacters(): Promise<PublicCharacter[]> {
+export type PublicScenePreset = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  backgroundId: string | null;
+  customBackgroundText: string | null;
+  promptText: string | null;
+};
+
+export type PublicAsset = {
+  id: string;
+  objectPath: string | null;
+  publicUrl: string | null;
+  mimeType: string | null;
+  fileName: string | null;
+  width: number | null;
+  height: number | null;
+};
+
+export async function fetchPublicCharacters(): Promise<PublicCharacterPreset[]> {
   const { data, error } = await supabase
     .from('characters')
     .select('id,slug,name,description,age,height_cm,weight_kg,bust_cm,waist_cm,hips_cm,body_fat_percent')
@@ -54,10 +75,10 @@ export async function fetchPublicCharacters(): Promise<PublicCharacter[]> {
   }));
 }
 
-export async function fetchPublicWardrobeItems(): Promise<PublicWardrobeItem[]> {
+export async function fetchPublicOutfits(): Promise<PublicOutfitPreset[]> {
   const { data, error } = await supabase
-    .from('wardrobe_items')
-    .select('id,slug,name,description,item_kind,primary_layer')
+    .from('outfit_presets')
+    .select('id,slug,name,description,category,suggested_background_id,prompt_text')
     .eq('is_public', true)
     .eq('status', 'active')
     .order('name');
@@ -67,8 +88,9 @@ export async function fetchPublicWardrobeItems(): Promise<PublicWardrobeItem[]> 
     slug: row.slug,
     name: row.name,
     description: row.description,
-    itemKind: row.item_kind,
-    primaryLayer: row.primary_layer,
+    category: row.category,
+    suggestedBackgroundId: row.suggested_background_id,
+    promptText: row.prompt_text,
   }));
 }
 
@@ -86,5 +108,44 @@ export async function fetchPublicBackgrounds(): Promise<PublicBackground[]> {
     name: row.name,
     description: row.description,
     promptText: row.prompt_text,
+  }));
+}
+
+export async function fetchPublicScenes(): Promise<PublicScenePreset[]> {
+  const { data, error } = await supabase
+    .from('scene_presets')
+    .select('id,slug,name,description,background_id,custom_background_text,prompt_text')
+    .eq('is_public', true)
+    .eq('status', 'active')
+    .order('name');
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    backgroundId: row.background_id,
+    customBackgroundText: row.custom_background_text,
+    promptText: row.prompt_text,
+  }));
+}
+
+export async function fetchPublicAssets(assetIds: readonly string[]): Promise<PublicAsset[]> {
+  if (assetIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('assets')
+    .select('id,object_path,public_url,mime_type,file_name,width,height')
+    .in('id', [...assetIds])
+    .eq('is_public', true)
+    .eq('status', 'active');
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    objectPath: row.object_path,
+    publicUrl: row.public_url,
+    mimeType: row.mime_type,
+    fileName: row.file_name,
+    width: row.width,
+    height: row.height,
   }));
 }
