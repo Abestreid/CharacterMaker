@@ -1,6 +1,7 @@
 import type {
   BreastFirmnessId,
   BreastShapeId,
+  BreastSizeId,
   ButtockFirmnessId,
   ButtockShapeId,
   CheekboneTypeId,
@@ -43,6 +44,7 @@ export interface CharacterState {
     hips: number;
     bodyFat: number;
     muscleMassId: MuscleMassId;
+    breastSizeId: BreastSizeId | null;
     breastShapeId: BreastShapeId | null;
     breastFirmnessId: BreastFirmnessId | null;
     buttockShapeId: ButtockShapeId | null;
@@ -51,12 +53,14 @@ export interface CharacterState {
   appearance: {
     ethnicityId: EthnicityId;
     skinToneId: SkinToneId;
+    skinDetails: string;
     eyeColorId: EyeColorId;
     hair: {
       lengthId: HairLengthId;
       typeId: HairTypeId;
       hairstyleId: HairstyleId;
       colorId: HairColorId;
+      details: string;
     };
     imageStyleId: ImageStyleId;
   };
@@ -79,9 +83,11 @@ export interface CharacterState {
     eyelinerStyleId: EyelinerStyleId | null;
     eyeshadowColorId: EyeshadowColorId | null;
     lipstickColorId: LipstickColorId | null;
+    details: string;
   };
   tattoos: {
     enabled: boolean;
     description: string;
   };
+  permanentFeatures: string;
 }
