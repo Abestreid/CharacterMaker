@@ -4,6 +4,7 @@ import {
   AGE_PARAMETER,
   BREAST_FIRMNESS_OPTIONS,
   BREAST_SHAPES,
+  BREAST_SIZE_OPTIONS,
   BUTTOCK_FIRMNESS_OPTIONS,
   BUTTOCK_SHAPES,
   CHARACTER_MEASUREMENTS,
@@ -45,7 +46,7 @@ import {
 } from '../components/ui';
 import { useEditorStore } from '../store/editor-store';
 
-type CharacterSection = 'basic' | 'body' | 'face' | 'hair' | 'makeup' | 'tattoos';
+type CharacterSection = 'basic' | 'body' | 'face' | 'hair' | 'makeup' | 'details' | 'tattoos';
 
 const sections = [
   { id: 'basic', label: 'Основное' },
@@ -53,6 +54,7 @@ const sections = [
   { id: 'face', label: 'Лицо' },
   { id: 'hair', label: 'Волосы' },
   { id: 'makeup', label: 'Макияж' },
+  { id: 'details', label: 'Особенности' },
   { id: 'tattoos', label: 'Тату' },
 ] as const;
 
@@ -63,7 +65,7 @@ export function CharacterPage() {
   const resetCharacter = useEditorStore((state) => state.resetCharacter);
 
   const action = (
-    <button className="focus-ring grid size-11 shrink-0 place-items-center rounded-2xl border border-zinc-800 bg-zinc-900/80 text-zinc-500 transition hover:text-zinc-100" onClick={resetCharacter} title="Сбросить параметры персонажа" type="button">
+    <button className="focus-ring grid size-11 shrink-0 place-items-center rounded-2xl border border-zinc-800 bg-zinc-900/80 text-zinc-500 transition hover:text-zinc-100" onClick={resetCharacter} title="Сбросить параметры персоны" type="button">
       <RotateCcw className="size-4" />
     </button>
   );
@@ -72,22 +74,23 @@ export function CharacterPage() {
     <div>
       <PageIntro
         action={action}
-        description="Настройка построена по принципу постепенного раскрытия: на экране остается только одна логическая группа параметров."
+        description="Все характеристики персоны используют единый domain-контракт и сохраняются в нормализованном виде в Supabase."
         eyebrow="Шаг 1"
-        title="Персонаж"
+        title="Персона"
       />
       <SectionTabs items={sections} onChange={setSection} value={section} />
 
       {section === 'basic' ? (
         <div className="grid gap-4 xl:grid-cols-2">
-          <SectionCard description="Базовые данные определяют общий профиль персонажа." title="Основные данные">
+          <SectionCard description="Базовые данные определяют общий профиль персоны." title="Основные данные">
             <ChoiceGrid columns={2} label="Пол" onChange={(genderId) => setCharacter({ ...character, identity: { ...character.identity, genderId } })} options={GENDERS} value={character.identity.genderId} />
             <NumberControl {...AGE_PARAMETER} onChange={(age) => setCharacter({ ...character, identity: { ...character.identity, age } })} value={character.identity.age} />
             <CatalogField label="Этнический тип" onChange={(ethnicityId) => setCharacter({ ...character, appearance: { ...character.appearance, ethnicityId } })} options={ETHNICITIES} value={character.appearance.ethnicityId} />
           </SectionCard>
 
-          <SectionCard description="Цветовые признаки и общий способ визуального представления." title="Визуальная основа">
+          <SectionCard description="Цветовые признаки, кожа и общий способ визуального представления." title="Визуальная основа">
             <CatalogField label="Тон кожи" onChange={(skinToneId) => setCharacter({ ...character, appearance: { ...character.appearance, skinToneId } })} options={SKIN_TONES} value={character.appearance.skinToneId} />
+            <TextArea label="Дополнительное описание кожи" onChange={(skinDetails) => setCharacter({ ...character, appearance: { ...character.appearance, skinDetails } })} placeholder="Веснушки, текстура, особенности оттенка и другие устойчивые признаки" value={character.appearance.skinDetails} />
             <CatalogField label="Цвет глаз" onChange={(eyeColorId) => setCharacter({ ...character, appearance: { ...character.appearance, eyeColorId } })} options={EYE_COLORS} value={character.appearance.eyeColorId} />
             <CatalogField label="Стиль изображения" onChange={(imageStyleId) => setCharacter({ ...character, appearance: { ...character.appearance, imageStyleId } })} options={IMAGE_STYLES} value={character.appearance.imageStyleId} />
           </SectionCard>
@@ -105,17 +108,18 @@ export function CharacterPage() {
             <NumberControl {...CHARACTER_MEASUREMENTS.bodyFat} onChange={(bodyFat) => setCharacter({ ...character, body: { ...character.body, bodyFat } })} value={character.body.bodyFat} />
           </SectionCard>
 
-          <SectionCard description="Дополнительные параметры композиции тела." title="Форма и композиция">
+          <SectionCard description="Дополнительные параметры формы и композиции тела." title="Форма и композиция">
             <ChoiceGrid columns={2} label="Мышечная масса" onChange={(muscleMassId) => setCharacter({ ...character, body: { ...character.body, muscleMassId } })} options={MUSCLE_MASS_OPTIONS} value={character.body.muscleMassId} />
             {character.identity.genderId === 'female' ? (
               <>
+                <CatalogField label="Размер груди" onChange={(breastSizeId) => setCharacter({ ...character, body: { ...character.body, breastSizeId } })} options={BREAST_SIZE_OPTIONS} value={character.body.breastSizeId} />
                 <CatalogField label="Форма груди" onChange={(breastShapeId) => setCharacter({ ...character, body: { ...character.body, breastShapeId } })} options={BREAST_SHAPES} value={character.body.breastShapeId} />
                 <ChoiceGrid columns={2} label="Упругость груди" onChange={(breastFirmnessId) => setCharacter({ ...character, body: { ...character.body, breastFirmnessId } })} options={BREAST_FIRMNESS_OPTIONS} value={character.body.breastFirmnessId} />
                 <ChoiceGrid columns={2} label="Форма ягодиц" onChange={(buttockShapeId) => setCharacter({ ...character, body: { ...character.body, buttockShapeId } })} options={BUTTOCK_SHAPES} value={character.body.buttockShapeId} />
                 <ChoiceGrid columns={2} label="Упругость ягодиц" onChange={(buttockFirmnessId) => setCharacter({ ...character, body: { ...character.body, buttockFirmnessId } })} options={BUTTOCK_FIRMNESS_OPTIONS} value={character.body.buttockFirmnessId} />
               </>
             ) : (
-              <div className="rounded-2xl border border-dashed border-zinc-800 p-4 text-sm leading-6 text-zinc-500">Женские параметры формы скрыты для мужского персонажа, но структура состояния остается валидной.</div>
+              <div className="rounded-2xl border border-dashed border-zinc-800 p-4 text-sm leading-6 text-zinc-500">Женские параметры формы не участвуют в сохранении мужской персоны.</div>
             )}
           </SectionCard>
         </div>
@@ -148,33 +152,43 @@ export function CharacterPage() {
 
       {section === 'hair' ? (
         <div className="grid gap-4 xl:grid-cols-2">
-          <SectionCard description="Четыре независимых параметра волос." title="Структура волос">
+          <SectionCard description="Базовая структура волос хранится отдельно от свободного уточняющего описания." title="Структура волос">
             <CatalogField label="Длина волос" onChange={(lengthId) => setCharacter({ ...character, appearance: { ...character.appearance, hair: { ...character.appearance.hair, lengthId } } })} options={HAIR_LENGTHS} value={character.appearance.hair.lengthId} />
             <ChoiceGrid columns={2} label="Тип волос" onChange={(typeId) => setCharacter({ ...character, appearance: { ...character.appearance, hair: { ...character.appearance.hair, typeId } } })} options={HAIR_TYPES} value={character.appearance.hair.typeId} />
           </SectionCard>
-          <SectionCard title="Прическа и цвет">
+          <SectionCard title="Прическа, цвет и детали">
             <CatalogField label="Прическа" onChange={(hairstyleId) => setCharacter({ ...character, appearance: { ...character.appearance, hair: { ...character.appearance.hair, hairstyleId } } })} options={HAIRSTYLES} value={character.appearance.hair.hairstyleId} />
             <CatalogField label="Цвет волос" onChange={(colorId) => setCharacter({ ...character, appearance: { ...character.appearance, hair: { ...character.appearance.hair, colorId } } })} options={HAIR_COLORS} value={character.appearance.hair.colorId} />
+            <TextArea label="Дополнительное описание волос" onChange={(details) => setCharacter({ ...character, appearance: { ...character.appearance, hair: { ...character.appearance.hair, details } } })} placeholder="Подтон, мелирование, пробор, особенности линии волос" value={character.appearance.hair.details} />
           </SectionCard>
         </div>
       ) : null}
 
       {section === 'makeup' ? (
         <SectionCard description="Дополнительные поля появляются только после включения макияжа." title="Макияж">
-          <Toggle checked={character.makeup.enabled} description="Показывать параметры подводки, теней и помады" label="Использовать макияж" onChange={(enabled) => setCharacter({ ...character, makeup: { ...character.makeup, enabled, eyelinerStyleId: enabled ? character.makeup.eyelinerStyleId ?? 'none' : null, eyeshadowColorId: enabled ? character.makeup.eyeshadowColorId ?? 'none' : null, lipstickColorId: enabled ? character.makeup.lipstickColorId ?? 'none' : null } })} />
+          <Toggle checked={character.makeup.enabled} description="Показывать параметры подводки, теней, помады и дополнительные инструкции" label="Использовать макияж" onChange={(enabled) => setCharacter({ ...character, makeup: { ...character.makeup, enabled, eyelinerStyleId: enabled ? character.makeup.eyelinerStyleId ?? 'none' : null, eyeshadowColorId: enabled ? character.makeup.eyeshadowColorId ?? 'none' : null, lipstickColorId: enabled ? character.makeup.lipstickColorId ?? 'none' : null, details: enabled ? character.makeup.details : '' } })} />
           {character.makeup.enabled ? (
-            <div className="grid gap-4 md:grid-cols-3">
-              <CatalogField label="Подводка" onChange={(eyelinerStyleId) => setCharacter({ ...character, makeup: { ...character.makeup, eyelinerStyleId } })} options={EYELINER_STYLES} value={character.makeup.eyelinerStyleId} />
-              <CatalogField label="Тени" onChange={(eyeshadowColorId) => setCharacter({ ...character, makeup: { ...character.makeup, eyeshadowColorId } })} options={EYESHADOW_COLORS} value={character.makeup.eyeshadowColorId} />
-              <CatalogField label="Помада" onChange={(lipstickColorId) => setCharacter({ ...character, makeup: { ...character.makeup, lipstickColorId } })} options={LIPSTICK_COLORS} value={character.makeup.lipstickColorId} />
-            </div>
+            <>
+              <div className="grid gap-4 md:grid-cols-3">
+                <CatalogField label="Подводка" onChange={(eyelinerStyleId) => setCharacter({ ...character, makeup: { ...character.makeup, eyelinerStyleId } })} options={EYELINER_STYLES} value={character.makeup.eyelinerStyleId} />
+                <CatalogField label="Тени" onChange={(eyeshadowColorId) => setCharacter({ ...character, makeup: { ...character.makeup, eyeshadowColorId } })} options={EYESHADOW_COLORS} value={character.makeup.eyeshadowColorId} />
+                <CatalogField label="Помада" onChange={(lipstickColorId) => setCharacter({ ...character, makeup: { ...character.makeup, lipstickColorId } })} options={LIPSTICK_COLORS} value={character.makeup.lipstickColorId} />
+              </div>
+              <TextArea label="Дополнительное описание макияжа" onChange={(details) => setCharacter({ ...character, makeup: { ...character.makeup, details } })} placeholder="Интенсивность, техника, особенности тона и другие устойчивые детали" value={character.makeup.details} />
+            </>
           ) : null}
         </SectionCard>
       ) : null}
 
+      {section === 'details' ? (
+        <SectionCard description="Устойчивые признаки, которые должны сохраняться между образами и сценами." title="Постоянные особенности">
+          <TextArea label="Постоянные особенности" onChange={(permanentFeatures) => setCharacter({ ...character, permanentFeatures })} placeholder="Родинки, шрамы, пирсинг, особенности зубов, асимметрия и другие канонические признаки" value={character.permanentFeatures} />
+        </SectionCard>
+      ) : null}
+
       {section === 'tattoos' ? (
-        <SectionCard description="В текущей domain-модели татуировки задаются переключателем и свободным описанием." title="Татуировки">
-          <Toggle checked={character.tattoos.enabled} description="Добавить текстовое описание татуировок" label="У персонажа есть татуировки" onChange={(enabled) => setCharacter({ ...character, tattoos: { ...character.tattoos, enabled } })} />
+        <SectionCard description="Татуировки задаются отдельно от других постоянных особенностей." title="Татуировки">
+          <Toggle checked={character.tattoos.enabled} description="Добавить текстовое описание татуировок" label="У персоны есть татуировки" onChange={(enabled) => setCharacter({ ...character, tattoos: { ...character.tattoos, enabled, description: enabled ? character.tattoos.description : '' } })} />
           {character.tattoos.enabled ? <TextArea label="Описание татуировок" onChange={(description) => setCharacter({ ...character, tattoos: { ...character.tattoos, description } })} placeholder="Например: небольшая роза на левом плече" value={character.tattoos.description} /> : null}
         </SectionCard>
       ) : null}
