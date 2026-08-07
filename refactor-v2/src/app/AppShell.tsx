@@ -7,6 +7,7 @@ import {
   RotateCcw,
   Shirt,
 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router';
 import {
   EYE_COLORS,
@@ -16,6 +17,7 @@ import {
   SKIN_TONES,
   getLabelById,
 } from '../domain';
+import { characterMakerService } from '../core/character-maker.service';
 import { cn } from '../components/ui';
 import { ThemeToggle } from '../theme/theme-toggle';
 import { useEditorStore } from '../store/editor-store';
@@ -27,10 +29,26 @@ const navigation = [
   { to: '/results', label: 'Результаты', icon: Images },
 ] as const;
 
+type ActiveCharacterPresetView = {
+  id: string | null;
+  name: string;
+  photoUrl: string | null;
+  photoCount: number;
+};
+
+const EMPTY_CHARACTER_PRESET: ActiveCharacterPresetView = {
+  id: null,
+  name: 'Новая персона',
+  photoUrl: null,
+  photoCount: 0,
+};
+
 export function AppShell() {
+  const activePreset = useActiveCharacterPreset();
+
   return (
     <div className="min-h-dvh">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-border bg-background/88 p-4 backdrop-blur-xl lg:block">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-border bg-background/88 p-4 backdrop-blur-xl lg:block">
         <Brand />
         <nav className="mt-8 space-y-1">
           {navigation.map((item) => <DesktopNavItem key={item.to} {...item} />)}
@@ -46,13 +64,13 @@ export function AppShell() {
           <ThemeToggle />
           <div>
             <p className="text-xs font-medium text-foreground">CharacterMaker V2</p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">Черновик редактора автоматически хранится локально. Пресеты сохраняются в общей библиотеке Supabase.</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">Черновик редактора автоматически хранится локально. Пресеты сохраняются отдельно в Supabase.</p>
           </div>
         </div>
       </aside>
 
-      <header className="safe-top sticky top-0 z-20 border-b border-border bg-background/88 px-3 py-2 backdrop-blur-xl sm:px-4 lg:ml-64">
-        <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-3">
+      <header className="safe-top sticky top-0 z-20 border-b border-border bg-background/88 px-3 py-2 backdrop-blur-xl sm:px-4 lg:ml-60">
+        <div className="mx-auto flex max-w-[1680px] items-center justify-between gap-3">
           <div className="lg:hidden"><Brand compact /></div>
           <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
             <CheckCircle2 className="size-4 text-emerald-500" />
@@ -62,13 +80,13 @@ export function AppShell() {
         </div>
       </header>
 
-      <div className="lg:ml-64">
-        <div className="mx-auto grid max-w-[1500px] grid-cols-1 gap-3 px-3 pb-24 pt-3 sm:px-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-6 lg:px-6 lg:pb-8 lg:pt-6 xl:gap-7">
+      <div className="lg:ml-60">
+        <div className="mx-auto grid max-w-[1680px] grid-cols-1 gap-3 px-3 pb-24 pt-3 sm:px-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-6 lg:px-6 lg:pb-8 lg:pt-6">
           <main className="min-w-0">
-            <div className="mb-3 lg:hidden"><MobileProfilePreview /></div>
+            <div className="mb-3 lg:hidden"><MobileProfilePreview preset={activePreset} /></div>
             <Outlet />
           </main>
-          <aside className="hidden lg:block"><ProfilePreview /></aside>
+          <aside className="hidden lg:block"><ProfilePreview preset={activePreset} /></aside>
         </div>
       </div>
 
@@ -120,46 +138,85 @@ function useProfileSummary() {
   };
 }
 
-function MobileProfilePreview() {
+function useActiveCharacterPreset(): ActiveCharacterPresetView {
+  const activeCharacterId = useEditorStore((state) => state.activeCharacterId);
+  const [revision, setRevision] = useState(0);
+  const [view, setView] = useState<ActiveCharacterPresetView>(EMPTY_CHARACTER_PRESET);
+
+  useEffect(() => {
+    const onLibraryChanged = () => setRevision((value) => value + 1);
+    window.addEventListener('charactermaker:library-changed', onLibraryChanged);
+    return () => window.removeEventListener('charactermaker:library-changed', onLibraryChanged);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeCharacterId) {
+      setView(EMPTY_CHARACTER_PRESET);
+      return undefined;
+    }
+
+    void Promise.all([
+      characterMakerService.characters.list(),
+      characterMakerService.presets.assets('character', activeCharacterId),
+    ]).then(([presets, assets]) => {
+      if (cancelled) return;
+      const preset = presets.find((item) => item.id === activeCharacterId);
+      const photo = assets.find((asset) => asset.isPrimary && asset.publicUrl)
+        ?? assets.find((asset) => ['cover', 'portrait', 'face_closeup'].includes(asset.role) && asset.publicUrl)
+        ?? assets.find((asset) => Boolean(asset.publicUrl));
+      setView({
+        id: activeCharacterId,
+        name: preset?.name ?? 'Загруженная персона',
+        photoUrl: photo?.publicUrl ?? null,
+        photoCount: assets.filter((asset) => Boolean(asset.publicUrl)).length,
+      });
+    }).catch(() => {
+      if (!cancelled) setView({ id: activeCharacterId, name: 'Загруженная персона', photoUrl: null, photoCount: 0 });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCharacterId, revision]);
+
+  return view;
+}
+
+function MobileProfilePreview({ preset }: { preset: ActiveCharacterPresetView }) {
   const { character, gender, eyes, hair } = useProfileSummary();
   return (
     <section className="surface overflow-hidden rounded-2xl p-2.5">
       <div className="flex items-center gap-2.5">
-        <div className="relative grid size-14 shrink-0 place-items-center overflow-hidden rounded-xl bg-gradient-to-b from-primary-soft to-surface-strong">
-          <div className="absolute top-2 size-5 rounded-full bg-foreground/15" />
-          <div className="absolute bottom-0 h-8 w-9 rounded-t-full bg-foreground/10" />
-        </div>
+        <PreviewImage className="size-16 shrink-0 rounded-xl" name={preset.name} photoUrl={preset.photoUrl} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <div className="truncate text-sm font-semibold text-foreground">Новая персона</div>
-            <span className="shrink-0 rounded-full bg-primary-soft px-2 py-0.5 text-[9px] font-medium text-primary-strong">Preview</span>
+            <div className="truncate text-sm font-semibold text-foreground">{preset.name}</div>
+            {preset.id ? <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">Загружен</span> : null}
           </div>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{gender}, {character.identity.age} лет · {character.body.height} см · {character.body.weight} кг</p>
-          <p className="mt-0.5 truncate text-[11px] text-subtle-foreground">{eyes} глаза · {hair} волосы</p>
+          <p className="mt-0.5 truncate text-[11px] text-subtle-foreground">{eyes} глаза · {hair} волосы{preset.photoCount ? ` · ${preset.photoCount} фото` : ''}</p>
         </div>
       </div>
     </section>
   );
 }
 
-function ProfilePreview() {
+function ProfilePreview({ preset }: { preset: ActiveCharacterPresetView }) {
   const { character, gender, skin, eyes, hair, style } = useProfileSummary();
   const resetCharacter = useEditorStore((state) => state.resetCharacter);
 
   return (
-    <div className="sticky top-24 space-y-4">
+    <div className="sticky top-20 space-y-4">
       <section className="surface overflow-hidden rounded-[2rem]">
-        <div className="relative h-72 overflow-hidden bg-gradient-to-b from-primary-soft via-sky-500/8 to-surface">
-          <div className="absolute inset-x-0 bottom-0 mx-auto h-56 w-40 rounded-t-[5rem] bg-gradient-to-b from-foreground/14 to-foreground/4" />
-          <div className="absolute left-1/2 top-10 size-24 -translate-x-1/2 rounded-full border border-border bg-gradient-to-b from-foreground/16 to-foreground/5" />
-          <div className="absolute inset-x-0 bottom-5 text-center">
-            <span className="rounded-full border border-border bg-background/70 px-3 py-1 text-xs text-muted-foreground backdrop-blur">Предпросмотр параметров</span>
-          </div>
-        </div>
+        <PreviewImage className="h-[360px] w-full" name={preset.name} photoUrl={preset.photoUrl} />
         <div className="space-y-3 p-4">
           <div className="flex items-start justify-between gap-3">
-            <div><h2 className="font-semibold text-foreground">Новая персона</h2><p className="mt-0.5 text-xs text-muted-foreground">{gender}, {character.identity.age} лет</p></div>
-            <button aria-label="Сбросить персону" className="focus-ring grid size-9 place-items-center rounded-full bg-surface text-muted-foreground transition hover:bg-surface-strong hover:text-foreground" onClick={resetCharacter} type="button"><RotateCcw className="size-4" /></button>
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2"><h2 className="truncate font-semibold text-foreground">{preset.name}</h2>{preset.id ? <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">Загружен</span> : null}</div>
+              <p className="mt-0.5 text-xs text-muted-foreground">{gender}, {character.identity.age} лет{preset.photoCount ? ` · ${preset.photoCount} фото` : ''}</p>
+            </div>
+            <button aria-label="Сбросить персону" className="focus-ring grid size-9 shrink-0 place-items-center rounded-full bg-surface text-muted-foreground transition hover:bg-surface-strong hover:text-foreground" onClick={resetCharacter} type="button"><RotateCcw className="size-4" /></button>
           </div>
           <dl className="grid grid-cols-2 gap-2 text-xs">
             <PreviewStat label="Рост" value={`${character.body.height} см`} />
@@ -171,6 +228,23 @@ function ProfilePreview() {
           </dl>
         </div>
       </section>
+    </div>
+  );
+}
+
+function PreviewImage({ photoUrl, name, className }: { photoUrl: string | null; name: string; className: string }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const canShowPhoto = Boolean(photoUrl && failedUrl !== photoUrl);
+
+  return (
+    <div className={cn('relative overflow-hidden bg-gradient-to-b from-primary-soft via-sky-500/8 to-surface-strong', className)}>
+      {canShowPhoto ? <img alt={`Основное фото: ${name}`} className="size-full object-cover object-top" onError={() => setFailedUrl(photoUrl)} src={photoUrl ?? undefined} /> : (
+        <>
+          <div className="absolute left-1/2 top-[13%] size-[24%] -translate-x-1/2 rounded-full border border-border bg-foreground/12" />
+          <div className="absolute inset-x-[22%] bottom-0 h-[66%] rounded-t-[45%] bg-gradient-to-b from-foreground/12 to-foreground/4" />
+          <div className="absolute inset-x-0 bottom-4 text-center"><span className="rounded-full border border-border bg-background/75 px-2.5 py-1 text-[10px] text-muted-foreground backdrop-blur">Фото пресета</span></div>
+        </>
+      )}
     </div>
   );
 }
