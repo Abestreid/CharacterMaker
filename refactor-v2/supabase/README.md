@@ -13,7 +13,7 @@ Region: `eu-central-1`
 - Database passwords and service-role keys must never be committed to GitHub or exposed to the browser.
 - Phase 1 has no CharacterMaker user accounts or authentication.
 - Anonymous/authenticated browser roles have read-only access to public active data.
-- Writes are intentionally blocked by RLS and are performed only through trusted administration/backend tooling.
+- Writes are blocked both by SQL privileges and by RLS; trusted administration/backend tooling handles mutations.
 - Binary media is stored in object storage; PostgreSQL stores metadata and relationships.
 - The `assets.storage_provider` field supports `supabase`, `r2`, and `external` so media storage can migrate later without redesigning the domain model.
 
@@ -81,7 +81,7 @@ Public read-only catalog/media buckets:
 - `generated-images`
 - `generated-videos`
 
-There are no anonymous insert/update/delete policies in phase 1.
+There are no anonymous insert/update/delete policies in phase 1. Public application roles also have their SQL write privileges explicitly revoked.
 
 ## Applied database migrations
 
@@ -92,6 +92,7 @@ There are no anonymous insert/update/delete policies in phase 1.
 5. `seed_scene_catalogs`
 6. `add_asset_variants_scene_presets_and_character_wardrobe`
 7. `add_foreign_key_indexes`
+8. `harden_public_roles_read_only`
 
 ## Current seeded catalogs
 
