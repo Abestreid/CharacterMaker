@@ -63,10 +63,15 @@ jobs:
           echo "DEPLOY_STAGE=dependencies" >> "$GITHUB_ENV"
           npm install --no-audit --no-fund
 
-      - name: Typecheck and tests
+      - name: Typecheck
         run: |
-          echo "DEPLOY_STAGE=checks" >> "$GITHUB_ENV"
-          npm run check
+          echo "DEPLOY_STAGE=typecheck" >> "$GITHUB_ENV"
+          npm run typecheck
+
+      - name: Tests
+        run: |
+          echo "DEPLOY_STAGE=tests" >> "$GITHUB_ENV"
+          npm test
 
       - name: Production build
         run: |
