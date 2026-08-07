@@ -15,6 +15,18 @@ export type PresetIdentity = {
   aiContext?: AiContext;
 };
 
+function identityPayload(identity: PresetIdentity): PresetPayload {
+  const payload: PresetPayload = {
+    name: identity.name,
+    slug: identity.slug,
+  };
+  if (identity.id !== undefined) payload.id = identity.id;
+  if (identity.description !== undefined) payload.description = identity.description;
+  if (identity.expectedVersion !== undefined) payload.expected_version = identity.expectedVersion;
+  if (identity.aiContext !== undefined) payload.ai_context = identity.aiContext;
+  return payload;
+}
+
 export function characterStateToPreset(identity: PresetIdentity, state: CharacterState): PresetPayload {
   const parameters: ParameterValueInput[] = [
     option('gender', state.identity.genderId),
@@ -43,11 +55,13 @@ export function characterStateToPreset(identity: PresetIdentity, state: Characte
     bool('has_tattoos', state.tattoos.enabled),
   ];
 
-  if (state.body.breastSizeId) parameters.push(option('breast_size', state.body.breastSizeId));
-  if (state.body.breastShapeId) parameters.push(option('breast_shape', state.body.breastShapeId));
-  if (state.body.breastFirmnessId) parameters.push(option('breast_firmness', state.body.breastFirmnessId));
-  if (state.body.buttockShapeId) parameters.push(option('buttock_shape', state.body.buttockShapeId));
-  if (state.body.buttockFirmnessId) parameters.push(option('buttock_firmness', state.body.buttockFirmnessId));
+  if (state.identity.genderId === 'female') {
+    if (state.body.breastSizeId) parameters.push(option('breast_size', state.body.breastSizeId));
+    if (state.body.breastShapeId) parameters.push(option('breast_shape', state.body.breastShapeId));
+    if (state.body.breastFirmnessId) parameters.push(option('breast_firmness', state.body.breastFirmnessId));
+    if (state.body.buttockShapeId) parameters.push(option('buttock_shape', state.body.buttockShapeId));
+    if (state.body.buttockFirmnessId) parameters.push(option('buttock_firmness', state.body.buttockFirmnessId));
+  }
   if (state.appearance.skinDetails.trim()) parameters.push(text('skin_details', state.appearance.skinDetails.trim()));
   if (state.appearance.hair.details.trim()) parameters.push(text('hair_details', state.appearance.hair.details.trim()));
   if (state.makeup.enabled) {
@@ -60,11 +74,7 @@ export function characterStateToPreset(identity: PresetIdentity, state: Characte
   if (state.permanentFeatures.trim()) parameters.push(text('permanent_features', state.permanentFeatures.trim()));
 
   return {
-    id: identity.id,
-    name: identity.name,
-    slug: identity.slug,
-    description: identity.description,
-    expected_version: identity.expectedVersion,
+    ...identityPayload(identity),
     schema_version: 'character-state-v3',
     ai_context: identity.aiContext ?? {},
     age: state.identity.age,
@@ -96,11 +106,7 @@ export function wardrobeStateToOutfitPreset(identity: PresetIdentity, state: War
   if (state.customDescription.trim()) parameters.push(text('accessories_custom', state.customDescription.trim()));
 
   return {
-    id: identity.id,
-    name: identity.name,
-    slug: identity.slug,
-    description: identity.description,
-    expected_version: identity.expectedVersion,
+    ...identityPayload(identity),
     schema_version: 'wardrobe-state-v2',
     ai_context: identity.aiContext ?? {},
     parameters,
@@ -143,11 +149,7 @@ export function sceneStateToPreset(identity: PresetIdentity, state: SceneState):
   };
 
   return {
-    id: identity.id,
-    name: identity.name,
-    slug: identity.slug,
-    description: identity.description,
-    expected_version: identity.expectedVersion,
+    ...identityPayload(identity),
     schema_version: 'scene-state-v3',
     ai_context: identity.aiContext ?? {},
     background_slug: state.environment.backgroundId,
