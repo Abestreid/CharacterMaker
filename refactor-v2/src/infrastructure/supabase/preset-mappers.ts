@@ -115,13 +115,21 @@ export function sceneStateToPreset(identity: PresetIdentity, state: SceneState):
   if (state.lighting.mainLightColorId) parameters.push(option('light_color', state.lighting.mainLightColorId, 0));
   if (state.lighting.accentLightColorId) parameters.push(option('light_color', state.lighting.accentLightColorId, 1));
 
+  const editorState: SceneState = {
+    ...state,
+    reference: {
+      ...state.reference,
+      image: null,
+    },
+  };
+
   return {
     ...identity,
     custom_background_text: state.environment.customBackground.trim() || null,
     parameters,
     metadata: {
       editor_schema: 'scene-state-v2',
-      editor_state: state,
+      editor_state: editorState,
       character_mode: state.character.mode,
       use_clothing_from_reference: state.reference.useClothing,
       use_expression_from_reference: state.reference.useExpression,
