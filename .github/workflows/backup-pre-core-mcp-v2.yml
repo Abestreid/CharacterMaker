@@ -1,0 +1,93 @@
+name: Backup CharacterMaker pre-Core-MCP v2
+
+on:
+  push:
+    branches:
+      - refactor/domain-catalog-v2
+    paths:
+      - '.github/workflows/backup-pre-core-mcp-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact pre-fix source backup
+        uses: actions/checkout@v4
+        with:
+          ref: backup/dev-2026-08-07-pre-core-mcp-fixes
+          path: source-backup
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate and rebuild pre-fix DEV bundle
+        working-directory: source-backup/refactor-v2
+        run: |
+          npm install --no-audit --no-fund
+          npm run check
+          npm run build
+
+      - name: Prepare lean source/build snapshot
+        run: |
+          mkdir -p backup/pre-fix-source backup/pre-fix-dist backup/metadata
+          rsync -a \
+            --exclude node_modules/ \
+            --exclude dist/ \
+            source-backup/refactor-v2/ backup/pre-fix-source/
+          cp -a source-backup/refactor-v2/dist/. backup/pre-fix-dist/
+          git -C source-backup rev-parse HEAD > backup/metadata/source-commit.txt
+          printf '%s\n' 'backup/dev-2026-08-07-pre-core-mcp-fixes' > backup/metadata/source-branch.txt
+          printf '%s\n' 'backup_20260807_1548' > backup/metadata/supabase-backup-schema.txt
+          printf '%s\n' '2026-08-07 pre-Core-MCP recovery artifact v2' > backup/metadata/description.txt
+
+      - name: Install FTP client
+        run: sudo apt-get update && sudo apt-get install -y lftp
+
+      - name: Snapshot InfinityFree media
+        env:
+          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME || secrets.FTP_USERNAME || secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD || secrets.FTP_PASSWORD || secrets.FTP_PASS }}
+        run: |
+          test -n "$FTP_SERVER"
+          test -n "$FTP_USERNAME"
+          test -n "$FTP_PASSWORD"
+          mkdir -p backup/media
+          lftp -c "
+            set ftp:passive-mode true;
+            set net:max-retries 3;
+            set net:timeout 20;
+            open -p 21 ftp://$FTP_SERVER;
+            user $FTP_USERNAME $FTP_PASSWORD;
+            mirror --verbose /htdocs/media backup/media;
+            bye
+          "
+
+      - name: Create recovery manifest and checksums
+        run: |
+          find backup -type f -print0 | sort -z | xargs -0 sha256sum > backup/SHA256SUMS.txt
+          {
+            echo "source_branch=backup/dev-2026-08-07-pre-core-mcp-fixes"
+            echo "source_commit=$(cat backup/metadata/source-commit.txt)"
+            echo "supabase_schema=backup_20260807_1548"
+            echo "source_files=$(find backup/pre-fix-source -type f | wc -l)"
+            echo "dist_files=$(find backup/pre-fix-dist -type f | wc -l)"
+            echo "media_files=$(find backup/media -type f | wc -l)"
+          } > backup/RECOVERY_MANIFEST.txt
+
+      - name: Upload recovery artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: charactermaker-pre-core-mcp-2026-08-07-v2
+          path: backup/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 9
