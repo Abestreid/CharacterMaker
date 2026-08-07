@@ -1,5 +1,3 @@
-import { requireAdminToken } from '../admin/admin-session';
-
 export type MediaScope = 'characters' | 'outfits' | 'scenes' | 'generations';
 
 export type UploadedMedia = {
@@ -20,7 +18,6 @@ export async function uploadImageToInfinityFree(input: {
   entityId: string;
   role: string;
 }): Promise<UploadedMedia> {
-  const token = requireAdminToken();
   const body = new FormData();
   body.set('file', input.file);
   body.set('scope', input.scope);
@@ -29,7 +26,6 @@ export async function uploadImageToInfinityFree(input: {
 
   const response = await fetch(`${mediaApiUrl()}?action=upload`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
     body,
   });
 
@@ -48,13 +44,9 @@ export async function uploadImageToInfinityFree(input: {
 }
 
 export async function deleteImageFromInfinityFree(objectPath: string): Promise<void> {
-  const token = requireAdminToken();
   const response = await fetch(`${mediaApiUrl()}?action=delete`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ objectPath }),
   });
   const payload = (await response.json()) as { error?: string };
