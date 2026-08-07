@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: charactermaker-v2-dev
@@ -32,6 +33,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Mark deployment pending
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state pending \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "CharacterMaker V2 DEV deployment in progress" \
+            --arg context "deployment/dev" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -112,3 +132,42 @@ jobs:
             "$DEPLOY_URL" -o /tmp/charactermaker-dev.html
           grep -q 'noindex,nofollow,noarchive' /tmp/charactermaker-dev.html
           echo "DEV deployment verified: $DEPLOY_URL"
+
+      - name: Mark deployment success
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state success \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "CharacterMaker V2 DEV deployed and verified" \
+            --arg context "deployment/dev" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
+
+      - name: Mark deployment failure
+        if: failure()
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state failure \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "CharacterMaker V2 DEV deployment failed" \
+            --arg context "deployment/dev" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
