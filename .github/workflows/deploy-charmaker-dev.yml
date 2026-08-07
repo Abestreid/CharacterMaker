@@ -77,8 +77,8 @@ jobs:
           test -s /tmp/charmaker-dev.html
         working-directory: .
 
-      - name: Install Chromium for visual verification
-        run: npx --yes playwright@latest install --with-deps chromium
+      - name: Install browsers for visual verification
+        run: npx --yes playwright@latest install --with-deps chromium webkit
         working-directory: .
 
       - name: Capture desktop screenshot
