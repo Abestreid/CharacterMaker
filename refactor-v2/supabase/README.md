@@ -4,88 +4,69 @@ Supabase project: `charmaker`
 Project ref: `kszybiwhchwekpmramxn`  
 Region: `eu-central-1`
 
-## Product model
+This document describes the actual current V2 persistence model. Historical experiments that are no longer used are explicitly marked as deprecated.
 
-CharacterMaker V2 has three primary saved preset entities:
+## Current product mode
+
+CharacterMaker is currently a personal/shared public tool without end-user accounts, roles or private presets.
+
+Primary saved entities:
 
 1. `characters` - UI: `Персона`.
-2. `outfit_presets` - UI: `Образ`; one preset is the complete clothing set, not a single garment.
-3. `scene_presets` - UI: `Сцена`; one preset combines background, action, camera, framing, lighting, style and other scene settings.
+2. `outfit_presets` - UI: `Образ`; one preset is a complete outfit/look.
+3. `scene_presets` - UI: `Сцена`; one preset combines background, action, camera, framing, lighting, style and reference behavior.
+4. `generations` - generated image records and provenance.
 
-`backgrounds` is a reusable background library/building block used inside Scene presets. It is not a replacement for a saved Scene.
+All active presets are intentionally stored in one shared public library at this stage.
 
-Each primary preset supports:
+## Infrastructure
 
-- create;
-- load into the editor;
-- update;
-- archive/delete;
-- attach multiple photos;
-- mark primary photos by role;
-- remove photos.
+- V2 branch: `refactor/domain-catalog-v2`.
+- Supabase PostgreSQL stores structured data, catalogs, metadata and relations.
+- Supabase Storage is not used.
+- Cloudflare/R2 is not used.
+- Images are physically stored on InfinityFree under `/media/...`.
+- Video is not part of the current product model.
+- GitHub Actions builds, tests and deploys DEV to `https://charmaker.free.nf/dev/`.
 
-## Fixed infrastructure
+## Public persistence flow
 
-- `main` remains the untouched legacy/reference source.
-- V2 development lives in `refactor/domain-catalog-v2`.
-- Supabase is used for PostgreSQL, public read API, RLS and the protected admin Edge Function.
-- Supabase Storage is not used for CharacterMaker files.
-- Cloudflare R2/S3 is not used.
-- Video is not part of the product/database model.
-- All photos/files are physically stored on InfinityFree under `/media/...`.
-- PostgreSQL stores only file metadata and relations.
+The current product intentionally has no user/auth layer.
 
-Example:
+Browser reads use Supabase public tables protected by read RLS policies.
 
-```text
-InfinityFree:
-/media/characters/{character_id}/portrait-....webp
+Preset writes use explicit public `SECURITY DEFINER` RPCs:
 
-Public URL:
-https://charmaker.free.nf/media/characters/{character_id}/portrait-....webp
+- `public_upsert_preset`
+- `public_delete_preset`
+- `public_attach_asset`
+- `public_delete_asset`
+- `public_set_character_outfit`
+- `public_set_asset_reference_status`
 
-Supabase:
-assets.object_path = /media/characters/...
-assets.public_url  = https://charmaker.free.nf/media/...
-character_assets   = character_id + asset_id + role
-```
+This is a deliberate temporary architecture for the personal/public phase. When user accounts are introduced later, ownership/private/public RLS must be designed as a separate migration instead of silently changing current behavior.
 
-The same principle is used for outfits, scenes and generated images.
+The old `admin-presets` Edge Function is deprecated and is not part of the active mutation flow. Old documentation describing an admin editing key must not be used as current architecture.
 
-## Security and editing
+## Shared Core contract
 
-Phase 1 has no end-user accounts and no CharacterMaker authentication.
+Web UI and the future MCP must use the same CharacterMaker application/domain layer.
 
-Public browser roles:
+Current shared application facade:
 
-- can SELECT active public data;
-- cannot INSERT/UPDATE/DELETE tables;
-- cannot execute mutation SECURITY DEFINER RPCs directly.
+`src/core/character-maker.service.ts`
 
-Preset mutations go through the Supabase Edge Function:
+It is responsible for the same operations that future MCP tools will call:
 
-```text
-admin-presets
-```
+- list/load/save Persona;
+- list/load/save Outfit;
+- list/load/save Scene;
+- catalogs;
+- preset assets;
+- media upload/delete;
+- reference status.
 
-The Edge Function performs custom validation of the single service editing key, then uses Supabase `service_role` internally to call the database RPC. The mutation RPCs themselves are executable by `service_role` only.
-
-The raw editing key:
-
-- is not committed to GitHub;
-- is not embedded in the frontend bundle;
-- is not stored in PostgreSQL;
-- is kept by the browser only in `sessionStorage` for the current tab after validation.
-
-Database mutation RPCs:
-
-- `admin_upsert_preset`
-- `admin_delete_preset`
-- `admin_attach_asset`
-- `admin_delete_asset`
-- `admin_set_character_outfit`
-
-Supabase Security Advisor is expected to remain clean because `anon` and `authenticated` cannot execute these RPCs.
+The Web UI must not create an independent business model for MCP.
 
 ## Catalog system
 
@@ -95,16 +76,28 @@ Core tables:
 - `catalog_categories`
 - `catalog_options`
 
-Flexible preset values:
+Normalized preset values:
 
 - `character_parameter_values`
 - `outfit_preset_parameter_values`
 - `background_parameter_values`
 - `scene_preset_parameter_values`
 
-Important physical measurements such as age, height, weight, bust, waist, hips and body-fat percentage remain normal columns on `characters`.
+Current control totals after synchronization:
 
-Every V2 preset also stores a lossless `metadata.editor_state` snapshot for exact editor restoration. Binary/Data URL image data is excluded from this snapshot. Normalized parameter rows remain available for filtering, validation and generation logic.
+- 68 catalogs;
+- 584 catalog options;
+- 55 reusable backgrounds.
+
+The local TypeScript option fallback also contains 584 option values. The DEV `Каталоги / Dev` page reads the complete catalog registry from Supabase and uses local TypeScript catalogs only as a network fallback.
+
+Character catalogs added to the V3 editor contract include:
+
+- `breast_size`;
+- `skin_details`;
+- `hair_details`;
+- `makeup_details`;
+- `permanent_features`.
 
 ## Persona
 
@@ -112,21 +105,27 @@ Primary table: `characters`
 Parameters: `character_parameter_values`  
 Photos: `character_assets`
 
-Photo roles include:
+Important physical measurements remain normal columns:
 
-- cover;
-- portrait;
-- face close-up;
-- full front;
-- full back;
-- left/right profile;
-- reference.
+- age;
+- height;
+- weight;
+- bust;
+- waist;
+- hips;
+- body-fat percentage.
 
-Files:
+Flexible appearance/body/detail values use normalized parameter rows.
 
-```text
-/media/characters/{character_id}/...
-```
+Current state schema:
+
+`character-state-v3`
+
+Additional Core/MCP columns:
+
+- `schema_version`;
+- `version` for optimistic concurrency;
+- `ai_context` JSONB for canonical AI description/instructions.
 
 ## Outfit
 
@@ -134,28 +133,26 @@ Primary table: `outfit_presets`
 Parameters: `outfit_preset_parameter_values`  
 Photos: `outfit_assets`
 
-One Outfit preset contains the complete look:
+One Outfit contains the complete look:
 
 - base layer;
 - top;
 - bottom;
 - outerwear;
 - footwear;
-- color per layer;
-- material per layer;
+- color/material per layer;
 - accessories;
-- custom description;
-- optional suggested background.
+- custom description.
 
-Photo roles include cover, front, back, side, detail, texture, on-model and reference.
+Current state schema:
 
-Files:
+`wardrobe-state-v2`
 
-```text
-/media/outfits/{outfit_preset_id}/...
-```
+Additional Core/MCP columns:
 
-A Persona can be linked to one or more Outfits through `character_outfits`; one may be marked as default.
+- `schema_version`;
+- `version`;
+- `ai_context`.
 
 ## Scene
 
@@ -163,44 +160,92 @@ Primary table: `scene_presets`
 Parameters: `scene_preset_parameter_values`  
 Photos: `scene_assets`
 
-A Scene preset contains or references:
+Current state schema:
 
-- background or custom background text;
+`scene-state-v3`
+
+A Scene stores:
+
 - pose or motion;
 - emotion;
-- character orientation;
+- orientation;
 - shot type;
-- vertical camera angle;
-- horizontal camera position;
+- vertical/horizontal camera angle;
 - aspect ratio;
-- natural/studio lighting mode;
-- time of day or studio setup;
-- main/accent light colors;
-- color temperature;
+- reusable background or custom background text;
+- natural/studio light settings;
+- colors and temperature;
 - image style;
 - filter;
-- reference behavior flags;
-- optional reference photos.
+- reference behavior.
 
-Photo roles include cover, preview, reference, background reference and style reference.
+`scene_presets.background_id` is the real UUID relation to `backgrounds`. The editor continues to use the stable background slug/catalog id. `public_upsert_preset` resolves `background_slug` to the corresponding `backgrounds.id`, so the editor and relational model no longer represent two unrelated background systems.
 
-Files:
+Reference behavior is stored in normal columns:
+
+- `reference_use_clothing`;
+- `reference_use_expression`.
+
+Temporary browser Data URLs are not persisted to Supabase and are excluded from Zustand local persistence.
+
+## Assets and InfinityFree
+
+Universal metadata table:
+
+`assets`
+
+Physical locations:
 
 ```text
+/media/characters/{character_id}/...
+/media/outfits/{outfit_preset_id}/...
 /media/scenes/{scene_preset_id}/...
+/media/generations/{generation_id}/...
 ```
 
-A temporary browser Data URL used while editing a Scene is never persisted to Supabase. The real reference must be uploaded as a Scene asset on InfinityFree.
+`api/media.php` accepts JPEG, PNG and WebP up to 8 MB, creates server-side filenames, validates image dimensions and returns:
 
-## Background library
+- public URL;
+- object path;
+- MIME type;
+- size;
+- width;
+- height.
 
-Tables:
+Supabase stores only metadata and entity relations.
 
-- `backgrounds`
-- `background_parameter_values`
-- `background_assets`
+Assets have `reference_status`:
 
-Backgrounds remain reusable building blocks. A saved Scene can choose one or use its own custom background text.
+- `normal`;
+- `approved`;
+- `canonical`;
+- `rejected`;
+- `reference_only`.
+
+This is the basis for distinguishing ordinary generations/references from identity-defining canonical images in MCP/AI workflows.
+
+## Preset loading
+
+`metadata.editor_state` remains a convenient snapshot/cache but is no longer the source required to restore a preset.
+
+Current loading reconstructs editor state from:
+
+1. primary entity columns;
+2. normalized `*_parameter_values` rows;
+3. relational background data where needed;
+4. normal Scene reference flags.
+
+This allows Web and future MCP clients to use the same database state even when an old preset does not contain a compatible editor snapshot.
+
+## Versioning and mutation safety
+
+Primary presets contain integer `version` fields.
+
+Updates may send `expected_version`. If the stored version changed since it was loaded, the RPC raises a version conflict instead of silently overwriting a newer update.
+
+`public_upsert_preset` also supports `idempotency_key`. Processed keys are recorded in `mutation_requests` so retrying the same create/save request can return the original result.
+
+`audit_log` records mutation actions and entity IDs for debugging and future MCP traceability.
 
 ## Generations
 
@@ -210,79 +255,42 @@ Tables:
 - `generation_sources`
 - `generation_assets`
 
-A generation can be linked to Persona, Outfit, Scene, background and reference assets.
+The existing schema already supports provenance links from a generation to:
 
-Generated image files:
+- Persona;
+- Outfit;
+- Scene;
+- Background;
+- reference assets.
 
-```text
-/media/generations/{generation_id}/...
-```
+The V2 Results UI currently represents images only. Generation-provider integration is a later layer and must use the shared Core context rather than legacy Gemini-specific state.
 
-Only metadata and relations are stored in Supabase.
+## Backups
 
-## InfinityFree media API
+Before the 2026-08-07 Core/MCP consistency corrections:
 
-Frontend endpoint:
+- Git backup branch: `backup/dev-2026-08-07-pre-core-mcp-fixes`;
+- Supabase snapshot schema: `backup_20260807_1548`.
 
-```text
-api/media.php
-```
+See `docs/backups/2026-08-07-pre-core-mcp-fixes.md`.
 
-Protected POST actions:
+## Migrations in Git
 
-- `?action=upload`
-- `?action=delete`
+All new schema changes must have a corresponding SQL file under:
 
-Current server-side restrictions:
+`supabase/migrations/`
 
-- JPEG, PNG, WebP only;
-- maximum 8 MB per image;
-- server-generated file names;
-- deletion restricted to `/media/...`.
+The Core/MCP readiness migration is recorded as:
 
-Upload transaction:
+`supabase/migrations/202608071600_core_mcp_readiness.sql`
 
-```text
-Browser
-  -> InfinityFree physical file
-  -> Supabase asset metadata
-  -> preset/asset relation
-```
+## Deprecated artifacts
 
-If metadata/relation creation fails after the physical upload, the frontend attempts to remove the just-uploaded file as rollback.
+The following are historical and not active architecture:
 
-Deletion transaction:
+- old `admin-presets` editing-key flow;
+- empty Supabase Storage buckets from the discarded storage design;
+- Cloudflare R2/S3 proposal;
+- video-related schema/UI assumptions.
 
-```text
-InfinityFree physical file
-  -> Supabase asset metadata/relation
-```
-
-## Deprecated Storage artifacts
-
-Five empty Supabase Storage buckets were created during the discarded early design. They are private, contain no files and are unused by the application. The active connector does not expose bucket deletion, so they remain inert deprecated artifacts only.
-
-## Current catalog data
-
-Current control totals:
-
-- 63 catalogs;
-- 580 catalog options;
-- 55 reusable background building blocks.
-
-Legacy `main` remains the source for later controlled import of the old 14 Persona presets, 58 Outfit presets and 26 Scene/photoshoot presets. Their inconsistent legacy values must be normalized explicitly during import rather than silently guessed.
-
-## Final corrective migrations
-
-Relevant migrations after the initial schema/seeds:
-
-- `harden_public_roles_read_only`
-- `align_media_schema_with_infinityfree_images_only`
-- `align_presets_with_product_model`
-- `add_admin_preset_crud_rpc`
-- `fix_infinityfree_asset_url_validation`
-- `remove_admin_config_table`
-- `restrict_admin_rpcs_to_service_role`
-- `clean_preset_indexes`
-
-Earlier migration names mentioning Supabase Storage describe superseded history, not the active media architecture.
+They must not be treated as current implementation requirements.
