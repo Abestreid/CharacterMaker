@@ -10,6 +10,7 @@ export const CHARACTER_DEFAULTS: CharacterState = {
     hips: 95,
     bodyFat: 22,
     muscleMassId: 'toned',
+    breastSizeId: null,
     breastShapeId: 'round',
     breastFirmnessId: 'firm',
     buttockShapeId: 'round',
@@ -18,12 +19,14 @@ export const CHARACTER_DEFAULTS: CharacterState = {
   appearance: {
     ethnicityId: 'caucasian',
     skinToneId: 'fair',
+    skinDetails: '',
     eyeColorId: 'brown',
     hair: {
       lengthId: 'long',
       typeId: 'wavy',
       hairstyleId: 'loose',
       colorId: 'brunette',
+      details: '',
     },
     imageStyleId: 'hyperrealistic_photo',
   },
@@ -46,9 +49,11 @@ export const CHARACTER_DEFAULTS: CharacterState = {
     eyelinerStyleId: 'thin',
     eyeshadowColorId: 'neutral_brown',
     lipstickColorId: 'natural',
+    details: '',
   },
   tattoos: {
     enabled: false,
     description: '',
   },
+  permanentFeatures: '',
 };
