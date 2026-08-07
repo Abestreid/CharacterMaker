@@ -2,11 +2,12 @@ import type { FormSectionDefinition } from '../catalog/core';
 
 export const CHARACTER_FORM_SECTIONS = [
   { id: 'identity', title: 'Основные данные', sortOrder: 10, fieldIds: ['identity.genderId', 'identity.age'] },
-  { id: 'body', title: 'Физические параметры', sortOrder: 20, fieldIds: ['body.height', 'body.weight', 'body.bust', 'body.waist', 'body.hips', 'body.bodyFat', 'body.muscleMassId', 'body.breastShapeId', 'body.breastFirmnessId', 'body.buttockShapeId', 'body.buttockFirmnessId'] },
-  { id: 'appearance', title: 'Внешность', sortOrder: 30, fieldIds: ['appearance.imageStyleId', 'appearance.ethnicityId', 'appearance.skinToneId', 'appearance.eyeColorId', 'appearance.hair.lengthId', 'appearance.hair.typeId', 'appearance.hair.hairstyleId', 'appearance.hair.colorId'] },
+  { id: 'body', title: 'Физические параметры', sortOrder: 20, fieldIds: ['body.height', 'body.weight', 'body.bust', 'body.waist', 'body.hips', 'body.bodyFat', 'body.muscleMassId', 'body.breastSizeId', 'body.breastShapeId', 'body.breastFirmnessId', 'body.buttockShapeId', 'body.buttockFirmnessId'] },
+  { id: 'appearance', title: 'Внешность', sortOrder: 30, fieldIds: ['appearance.imageStyleId', 'appearance.ethnicityId', 'appearance.skinToneId', 'appearance.skinDetails', 'appearance.eyeColorId', 'appearance.hair.lengthId', 'appearance.hair.typeId', 'appearance.hair.hairstyleId', 'appearance.hair.colorId', 'appearance.hair.details'] },
   { id: 'face', title: 'Черты лица', sortOrder: 40, fieldIds: ['face.headShapeId', 'face.foreheadSizeId', 'face.eyebrowShapeId', 'face.eyebrowThicknessId', 'face.eyeShapeId', 'face.eyeSizeId', 'face.eyeSpacingId', 'face.noseShapeId', 'face.noseSizeId', 'face.lipShapeId', 'face.cheekboneTypeId', 'face.chinShapeId'] },
-  { id: 'makeup', title: 'Макияж', sortOrder: 50, fieldIds: ['makeup.enabled', 'makeup.eyelinerStyleId', 'makeup.eyeshadowColorId', 'makeup.lipstickColorId'] },
-  { id: 'tattoos', title: 'Татуировки', sortOrder: 60, fieldIds: ['tattoos.enabled', 'tattoos.description'] },
+  { id: 'makeup', title: 'Макияж', sortOrder: 50, fieldIds: ['makeup.enabled', 'makeup.eyelinerStyleId', 'makeup.eyeshadowColorId', 'makeup.lipstickColorId', 'makeup.details'] },
+  { id: 'features', title: 'Постоянные особенности', sortOrder: 60, fieldIds: ['permanentFeatures'] },
+  { id: 'tattoos', title: 'Татуировки', sortOrder: 70, fieldIds: ['tattoos.enabled', 'tattoos.description'] },
 ] as const satisfies readonly FormSectionDefinition[];
 
 export const WARDROBE_FORM_SECTIONS = [
