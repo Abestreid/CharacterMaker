@@ -1,5 +1,7 @@
 import { supabase } from './client';
 
+export type PresetMetadata = Record<string, unknown> & { editor_state?: unknown };
+
 export type PublicCharacterPreset = {
   id: string;
   slug: string;
@@ -12,6 +14,7 @@ export type PublicCharacterPreset = {
   waistCm: number | null;
   hipsCm: number | null;
   bodyFatPercent: number | null;
+  metadata: PresetMetadata;
 };
 
 export type PublicOutfitPreset = {
@@ -22,6 +25,7 @@ export type PublicOutfitPreset = {
   category: string | null;
   suggestedBackgroundId: string | null;
   promptText: string | null;
+  metadata: PresetMetadata;
 };
 
 export type PublicWardrobeItem = PublicOutfitPreset;
@@ -42,6 +46,7 @@ export type PublicScenePreset = {
   backgroundId: string | null;
   customBackgroundText: string | null;
   promptText: string | null;
+  metadata: PresetMetadata;
 };
 
 export type PublicAsset = {
@@ -57,7 +62,7 @@ export type PublicAsset = {
 export async function fetchPublicCharacters(): Promise<PublicCharacterPreset[]> {
   const { data, error } = await supabase
     .from('characters')
-    .select('id,slug,name,description,age,height_cm,weight_kg,bust_cm,waist_cm,hips_cm,body_fat_percent')
+    .select('id,slug,name,description,age,height_cm,weight_kg,bust_cm,waist_cm,hips_cm,body_fat_percent,metadata')
     .eq('is_public', true)
     .eq('status', 'active')
     .order('name');
@@ -74,13 +79,14 @@ export async function fetchPublicCharacters(): Promise<PublicCharacterPreset[]> 
     waistCm: row.waist_cm === null ? null : Number(row.waist_cm),
     hipsCm: row.hips_cm === null ? null : Number(row.hips_cm),
     bodyFatPercent: row.body_fat_percent === null ? null : Number(row.body_fat_percent),
+    metadata: asMetadata(row.metadata),
   }));
 }
 
 export async function fetchPublicOutfits(): Promise<PublicOutfitPreset[]> {
   const { data, error } = await supabase
     .from('outfit_presets')
-    .select('id,slug,name,description,category,suggested_background_id,prompt_text')
+    .select('id,slug,name,description,category,suggested_background_id,prompt_text,metadata')
     .eq('is_public', true)
     .eq('status', 'active')
     .order('name');
@@ -93,6 +99,7 @@ export async function fetchPublicOutfits(): Promise<PublicOutfitPreset[]> {
     category: row.category,
     suggestedBackgroundId: row.suggested_background_id,
     promptText: row.prompt_text,
+    metadata: asMetadata(row.metadata),
   }));
 }
 
@@ -118,7 +125,7 @@ export async function fetchPublicBackgrounds(): Promise<PublicBackground[]> {
 export async function fetchPublicScenes(): Promise<PublicScenePreset[]> {
   const { data, error } = await supabase
     .from('scene_presets')
-    .select('id,slug,name,description,background_id,custom_background_text,prompt_text')
+    .select('id,slug,name,description,background_id,custom_background_text,prompt_text,metadata')
     .eq('is_public', true)
     .eq('status', 'active')
     .order('name');
@@ -131,6 +138,7 @@ export async function fetchPublicScenes(): Promise<PublicScenePreset[]> {
     backgroundId: row.background_id,
     customBackgroundText: row.custom_background_text,
     promptText: row.prompt_text,
+    metadata: asMetadata(row.metadata),
   }));
 }
 
@@ -152,4 +160,8 @@ export async function fetchPublicAssets(assetIds: readonly string[]): Promise<Pu
     width: row.width,
     height: row.height,
   }));
+}
+
+function asMetadata(value: unknown): PresetMetadata {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as PresetMetadata : {};
 }
