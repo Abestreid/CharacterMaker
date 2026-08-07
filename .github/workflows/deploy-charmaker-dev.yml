@@ -1,0 +1,66 @@
+name: Deploy CharacterMaker V2 to dev
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - refactor/domain-catalog-v2
+    paths:
+      - 'refactor-v2/**'
+      - '.github/workflows/deploy-charmaker-dev.yml'
+
+concurrency:
+  group: charmaker-dev-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: refactor-v2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: refactor-v2/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and test
+        run: npm run check
+
+      - name: Build production frontend
+        run: npm run build
+
+      - name: Install FTP client
+        run: sudo apt-get update && sudo apt-get install -y lftp
+        working-directory: .
+
+      - name: Deploy dist to InfinityFree /dev
+        env:
+          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD }}
+        run: |
+          test -n "$FTP_SERVER"
+          test -n "$FTP_USERNAME"
+          test -n "$FTP_PASSWORD"
+          lftp -c "
+            set ftp:passive-mode true;
+            set net:max-retries 3;
+            set net:timeout 20;
+            open -p 21 ftp://$FTP_SERVER;
+            user $FTP_USERNAME $FTP_PASSWORD;
+            mkdir -p /htdocs/dev;
+            mirror --reverse --delete --verbose --parallel=4 --create-dirs dist/ /htdocs/dev/;
+            bye
+          "
