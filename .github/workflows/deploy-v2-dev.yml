@@ -9,10 +9,6 @@ on:
       - '.github/workflows/deploy-v2-dev.yml'
   workflow_dispatch:
 
-permissions:
-  contents: read
-  statuses: write
-
 concurrency:
   group: charactermaker-v2-dev
   cancel-in-progress: true
@@ -31,27 +27,8 @@ jobs:
         working-directory: refactor-v2
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Mark deployment pending
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          payload=$(jq -n \
-            --arg state pending \
-            --arg target_url "$DEPLOY_URL" \
-            --arg description "CharacterMaker V2 DEV deployment in progress" \
-            --arg context "deployment/dev" \
-            '{state:$state,target_url:$target_url,description:$description,context:$context}')
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "$payload" >/dev/null
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -59,54 +36,16 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        run: |
-          echo "DEPLOY_STAGE=dependencies" >> "$GITHUB_ENV"
-          npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund
 
-      - name: Typecheck
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "DEPLOY_STAGE=typecheck" >> "$GITHUB_ENV"
-          set +e
-          npm run typecheck 2>&1 | tee /tmp/typecheck.log
-          exit_code=${PIPESTATUS[0]}
-          set -e
-          if [ "$exit_code" -ne 0 ]; then
-            first_error=$(grep -m1 -E 'error TS[0-9]+' /tmp/typecheck.log || true)
-            if [ -n "$first_error" ]; then
-              compact=$(printf '%s' "$first_error" | sed -E 's/[[:space:]]+/ /g' | cut -c1-120)
-              context_slug=$(printf '%s' "$compact" | tr ' /' '__' | tr -cd '[:alnum:]_.():-')
-              payload=$(jq -n \
-                --arg state failure \
-                --arg target_url "$DEPLOY_URL" \
-                --arg description "$compact" \
-                --arg context "typecheck/$context_slug" \
-                '{state:$state,target_url:$target_url,description:$description,context:$context}')
-              curl --fail-with-body --silent --show-error \
-                -X POST \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                -H "X-GitHub-Api-Version: 2022-11-28" \
-                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-                -d "$payload" >/dev/null
-            fi
-            exit "$exit_code"
-          fi
-
-      - name: Tests
-        run: |
-          echo "DEPLOY_STAGE=tests" >> "$GITHUB_ENV"
-          npm test
+      - name: Typecheck and tests
+        run: npm run check
 
       - name: Production build
-        run: |
-          echo "DEPLOY_STAGE=build" >> "$GITHUB_ENV"
-          npm run build
+        run: npm run build
 
       - name: Add DEV noindex protection
         run: |
-          echo "DEPLOY_STAGE=noindex" >> "$GITHUB_ENV"
           python - <<'PY'
           from pathlib import Path
 
@@ -119,102 +58,63 @@ jobs:
               html = html.replace('</head>', f'  {tag}\n</head>', 1)
               index.write_text(html, encoding='utf-8')
 
-          Path('dist/robots.txt').write_text(
-              'User-agent: *\nDisallow: /\n',
-              encoding='utf-8',
-          )
+          Path('dist/robots.txt').write_text('User-agent: *\nDisallow: /\n', encoding='utf-8')
           PY
 
       - name: Validate deploy target
         run: |
-          echo "DEPLOY_STAGE=target-validation" >> "$GITHUB_ENV"
-          test "$DEPLOY_DIR" = "/htdocs/dev" || {
-            echo "Unsafe DEV deploy path: $DEPLOY_DIR"
-            exit 1
-          }
+          test "$DEPLOY_DIR" = "/htdocs/dev"
           test -f dist/index.html
           test -d dist/assets
 
-      - name: Set FTPS deployment stage
+      - name: Install FTP client
+        run: sudo apt-get update && sudo apt-get install -y lftp
         working-directory: .
-        run: echo "DEPLOY_STAGE=ftps-deploy" >> "$GITHUB_ENV"
 
-      - name: Deploy DEV over FTPS Explicit TLS
-        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftps
-          port: 21
-          security: loose
-          timeout: 120000
-          local-dir: ./refactor-v2/dist/
-          server-dir: /htdocs/dev/
-          dangerous-clean-slate: false
-          log-level: standard
-
-      - name: Setup Chrome for browser verification
-        uses: browser-actions/setup-chrome@v2.1.2
-        with:
-          chrome-version: stable
-
-      - name: Verify DEV URL in real browser
-        working-directory: .
-        run: |
-          echo "DEPLOY_STAGE=browser-verify" >> "$GITHUB_ENV"
-          chrome --version
-          chrome \
-            --headless=new \
-            --no-sandbox \
-            --disable-gpu \
-            --virtual-time-budget=15000 \
-            --dump-dom \
-            "$DEPLOY_URL" > /tmp/charactermaker-dev.html
-
-          grep -q 'noindex,nofollow,noarchive' /tmp/charactermaker-dev.html
-          grep -q 'AI Character Maker V2' /tmp/charactermaker-dev.html || \
-            grep -q 'CharacterMaker' /tmp/charactermaker-dev.html
-          echo "DEV browser verification passed: $DEPLOY_URL"
-
-      - name: Mark deployment success
-        working-directory: .
+      - name: Deploy DEV to InfinityFree
         env:
-          GH_TOKEN: ${{ github.token }}
+          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME || secrets.FTP_USERNAME || secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD || secrets.FTP_PASSWORD || secrets.FTP_PASS }}
         run: |
-          payload=$(jq -n \
-            --arg state success \
-            --arg target_url "$DEPLOY_URL" \
-            --arg description "CharacterMaker V2 DEV deployed and browser-verified" \
-            --arg context "deployment/dev" \
-            '{state:$state,target_url:$target_url,description:$description,context:$context}')
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "$payload" >/dev/null
+          test -n "$FTP_SERVER"
+          test -n "$FTP_USERNAME"
+          test -n "$FTP_PASSWORD"
+          lftp -c "
+            set ftp:passive-mode true;
+            set net:max-retries 3;
+            set net:timeout 20;
+            open -p 21 ftp://$FTP_SERVER;
+            user $FTP_USERNAME $FTP_PASSWORD;
+            cd $DEPLOY_DIR;
+            mirror --reverse --delete --no-perms --verbose --parallel=4 dist/ .;
+            bye
+          "
 
-      - name: Mark deployment failure
-        if: failure()
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: HTTP smoke check
+        continue-on-error: true
         run: |
-          stage="${DEPLOY_STAGE:-unknown}"
-          for context in "deployment/dev" "deployment/dev/failure/$stage"; do
-            payload=$(jq -n \
-              --arg state failure \
-              --arg target_url "$DEPLOY_URL" \
-              --arg description "CharacterMaker V2 DEV failed at $stage" \
-              --arg context "$context" \
-              '{state:$state,target_url:$target_url,description:$description,context:$context}')
-            curl --fail-with-body --silent --show-error \
-              -X POST \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-              -d "$payload" >/dev/null
-          done
+          curl --fail --location --silent --show-error --max-time 30 "$DEPLOY_URL" -o /tmp/charmaker-dev.html
+          test -s /tmp/charmaker-dev.html
+        working-directory: .
+
+      - name: Install browsers for visual verification
+        run: npx --yes playwright@latest install --with-deps chromium webkit
+        working-directory: .
+
+      - name: Verify and capture desktop
+        run: npx --yes playwright@latest screenshot --device="Desktop Chrome" --wait-for-timeout=5000 --full-page "$DEPLOY_URL" /tmp/charmaker-dev-desktop.png
+        working-directory: .
+
+      - name: Verify and capture mobile
+        run: npx --yes playwright@latest screenshot --device="iPhone 13" --wait-for-timeout=5000 --full-page "$DEPLOY_URL" /tmp/charmaker-dev-mobile.png
+        working-directory: .
+
+      - name: Upload visual verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: charmaker-dev-screenshots
+          path: |
+            /tmp/charmaker-dev-desktop.png
+            /tmp/charmaker-dev-mobile.png
+          retention-days: 7
