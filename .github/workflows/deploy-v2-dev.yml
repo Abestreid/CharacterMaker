@@ -12,7 +12,6 @@ on:
 permissions:
   contents: read
   statuses: write
-  issues: write
 
 concurrency:
   group: charactermaker-v2-dev
@@ -166,12 +165,30 @@ jobs:
 
       - name: HTTP smoke check
         id: http
-        run: |
-          curl --fail --location --silent --show-error --max-time 30 \
-            -H 'Cache-Control: no-cache' \
-            "$DEPLOY_URL?commit=$GITHUB_SHA" -o /tmp/charmaker-dev.html
-          test -s /tmp/charmaker-dev.html
         working-directory: .
+        run: |
+          set -e
+          url="$DEPLOY_URL?commit=$GITHUB_SHA"
+          user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+          for attempt in 1 2 3 4 5 6; do
+            rm -f /tmp/charmaker-dev.html /tmp/charmaker-http-code.txt
+            code=$(curl --location --silent --show-error --max-time 30 \
+              --connect-timeout 15 \
+              --user-agent "$user_agent" \
+              -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' \
+              -H 'Cache-Control: no-cache' \
+              -w '%{http_code}' \
+              "$url" -o /tmp/charmaker-dev.html || true)
+            echo "HTTP attempt $attempt: $code"
+            if [ "$code" = "200" ] && [ -s /tmp/charmaker-dev.html ]; then
+              grep -qi '<html\|<!doctype' /tmp/charmaker-dev.html
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "DEV HTTP smoke failed after retries" >&2
+          if [ -f /tmp/charmaker-dev.html ]; then head -c 500 /tmp/charmaker-dev.html || true; fi
+          exit 1
 
       - name: Install browsers for mandatory visual verification
         id: browsers
@@ -205,31 +222,6 @@ jobs:
             /tmp/charmaker-dev-android-chrome.png
           if-no-files-found: ignore
           retention-days: 7
-
-      - name: TEMP report exact deployment stage on failure
-        if: failure()
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cat > /tmp/deploy-stage.md <<EOF
-          Temporary deployment diagnostic for commit $GITHUB_SHA.
-
-          - dependencies: ${{ steps.dependencies.outcome }}
-          - check: ${{ steps.check.outcome }}
-          - build: ${{ steps.build.outcome }}
-          - metadata: ${{ steps.metadata.outcome }}
-          - validate: ${{ steps.validate.outcome }}
-          - ftp_client: ${{ steps.ftp_client.outcome }}
-          - deploy: ${{ steps.deploy.outcome }}
-          - verify_ftp: ${{ steps.verify_ftp.outcome }}
-          - http: ${{ steps.http.outcome }}
-          - browsers: ${{ steps.browsers.outcome }}
-          - desktop: ${{ steps.desktop.outcome }}
-          - ios: ${{ steps.ios.outcome }}
-          - android: ${{ steps.android.outcome }}
-          EOF
-          gh issue create --repo "$GITHUB_REPOSITORY" --title "TEMP DEV deployment stage ${GITHUB_SHA:0:7}" --body-file /tmp/deploy-stage.md
 
       - name: Mark deployment success
         if: success()
