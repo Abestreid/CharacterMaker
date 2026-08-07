@@ -1,4 +1,4 @@
-import { supabase } from '../supabase/client';
+import { callAdminApi } from './admin-api';
 
 const SESSION_KEY = 'charmaker.admin.token';
 
@@ -20,9 +20,12 @@ export function clearAdminToken(): void {
 }
 
 export async function validateAdminToken(token: string): Promise<boolean> {
-  const { data, error } = await supabase.rpc('admin_validate_token', { p_token: token.trim() });
-  if (error) return false;
-  return data === true;
+  try {
+    const response = await callAdminApi<never>(token.trim(), 'validate');
+    return response.valid === true;
+  } catch {
+    return false;
+  }
 }
 
 export function requireAdminToken(): string {
