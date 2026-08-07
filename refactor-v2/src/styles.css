@@ -172,6 +172,41 @@ img {
   accent-color: var(--primary);
 }
 
+/* Temporary compatibility layer while legacy page-level zinc utilities are migrated to semantic tokens. */
+html:not(.dark) [class*="bg-zinc-950"] {
+  background-color: var(--input) !important;
+}
+
+html:not(.dark) [class*="bg-zinc-900"] {
+  background-color: var(--surface) !important;
+}
+
+html:not(.dark) [class*="border-zinc-800"],
+html:not(.dark) [class*="border-zinc-700"] {
+  border-color: var(--border) !important;
+}
+
+html:not(.dark) [class*="text-zinc-100"],
+html:not(.dark) [class*="text-zinc-200"],
+html:not(.dark) [class*="text-zinc-300"] {
+  color: var(--foreground) !important;
+}
+
+html:not(.dark) [class*="text-zinc-400"],
+html:not(.dark) [class*="text-zinc-500"] {
+  color: var(--muted-foreground) !important;
+}
+
+html:not(.dark) [class*="text-zinc-600"] {
+  color: var(--subtle-foreground) !important;
+}
+
+html:not(.dark) [class*="text-violet-100"],
+html:not(.dark) [class*="text-violet-200"],
+html:not(.dark) [class*="text-violet-300"] {
+  color: var(--primary-strong) !important;
+}
+
 @media (max-width: 639px) {
   input,
   textarea,
