@@ -1,7 +1,6 @@
 <?php
 declare(strict_types=1);
 
-const ADMIN_TOKEN_SHA256 = '34ee4689078c6585f010835e0fecc0958f74adc7c4aed65cbae2cc49a3a77c35';
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const PUBLIC_MEDIA_BASE = 'https://charmaker.free.nf/media';
 
@@ -17,18 +16,6 @@ function fail(string $message, int $status = 400): never {
     http_response_code($status);
     echo json_encode(['error' => $message], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
-}
-
-function adminToken(): string {
-    $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    if (!preg_match('/^Bearer\s+(.+)$/i', $header, $matches)) {
-        fail('Требуется служебный ключ редактирования.', 401);
-    }
-    $token = trim($matches[1]);
-    if ($token === '' || !hash_equals(ADMIN_TOKEN_SHA256, hash('sha256', $token))) {
-        fail('Неверный служебный ключ редактирования.', 403);
-    }
-    return $token;
 }
 
 function documentRoot(): string {
@@ -128,7 +115,6 @@ function deleteMedia(): never {
     exit;
 }
 
-adminToken();
 $action = $_GET['action'] ?? '';
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('Разрешен только POST.', 405);
 if ($action === 'upload') upload();
