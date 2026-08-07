@@ -54,20 +54,20 @@ export function CatalogsPage() {
     fetchPublicCatalogs()
       .then((remoteCatalogs) => {
         if (!active || remoteCatalogs.length === 0) return;
-        setCatalogs(remoteCatalogs.map((catalog) => ({
+        setCatalogs(remoteCatalogs.map((catalog): CatalogEntry => ({
           key: catalog.key,
           section: catalog.section,
           label: catalog.label,
           valueType: catalog.valueType,
-          unit: catalog.unit,
-          min: catalog.min,
-          max: catalog.max,
-          step: catalog.step,
-          options: catalog.options.map((option) => ({
+          ...(catalog.unit !== undefined ? { unit: catalog.unit } : {}),
+          ...(catalog.min !== undefined ? { min: catalog.min } : {}),
+          ...(catalog.max !== undefined ? { max: catalog.max } : {}),
+          ...(catalog.step !== undefined ? { step: catalog.step } : {}),
+          options: catalog.options.map((option): OptionLike => ({
             id: option.id,
             label: option.label,
-            ...(option.categoryId ? { categoryId: option.categoryId } : {}),
-            ...(option.hex ? { hex: option.hex } : {}),
+            ...(option.categoryId !== undefined ? { categoryId: option.categoryId } : {}),
+            ...(option.hex !== undefined ? { hex: option.hex } : {}),
           })),
         })));
         setSource('supabase');
