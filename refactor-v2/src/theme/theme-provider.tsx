@@ -28,6 +28,9 @@ function applyTheme(theme: ResolvedTheme) {
   root.classList.toggle('dark', theme === 'dark');
   root.dataset.theme = theme;
   root.style.colorScheme = theme;
+
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (themeColor) themeColor.content = theme === 'dark' ? '#09090b' : '#f7f7fa';
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
