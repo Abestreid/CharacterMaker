@@ -24,6 +24,7 @@ export type ParameterValueInput = {
   text_value?: string | null;
   boolean_value?: boolean | null;
   json_value?: unknown;
+  delete?: boolean;
 };
 
 export type PresetPayload = {
@@ -55,6 +56,11 @@ export type PresetPayload = {
   reference_use_expression?: boolean;
 };
 
+export type PresetPatch = Partial<Omit<PresetPayload, 'id' | 'parameters' | 'metadata' | 'expected_version' | 'idempotency_key'>> & {
+  parameters?: ParameterValueInput[];
+  mutation_source?: 'web' | 'mcp' | 'migration' | 'system';
+};
+
 export type AttachAssetInput = {
   ownerKind: AssetOwnerKind;
   ownerId: string;
@@ -83,6 +89,21 @@ export async function savePreset(kind: PresetKind, payload: PresetPayload): Prom
   if (error) throw error;
   if (typeof data !== 'string' || !data.trim()) throw new Error('Supabase не вернул ID сохраненного пресета.');
   return data;
+}
+
+export async function patchPreset(kind: PresetKind, id: string, patch: PresetPatch, expectedVersion?: number): Promise<string> {
+  const { data, error } = await supabase.rpc('public_patch_preset', {
+    p_kind: kind,
+    p_id: id,
+    p_patch: { ...patch, mutation_source: patch.mutation_source ?? 'web' },
+    p_expected_version: expectedVersion ?? null,
+    p_idempotency_key: crypto.randomUUID(),
+  });
+  if (error) throw error;
+  if (!data || typeof data !== 'object' || typeof data.id !== 'string' || !data.id.trim()) {
+    throw new Error('Supabase не вернул ID обновленного пресета.');
+  }
+  return data.id;
 }
 
 export async function deletePreset(kind: PresetKind, id: string, hard = false): Promise<boolean> {
