@@ -4,6 +4,17 @@
 
 ## 2026-08-07
 
+### Final audit and mandatory device verification
+
+- финальная проверка данных подтвердила: 68 catalogs, 584 catalog options, 55 backgrounds, 3 исторические character records, из которых только `Лайвет` была active/public уже в исходном backup;
+- текущие статусы всех трех существовавших до работ character records сверены с `backup_20260807_1548` и совпадают 1:1 - исправления не архивировали пользовательские данные;
+- test fixtures после MCP/DB validation отсутствуют: 0 MCP test characters, 0 rollback-test outfits, 0 rollback-test scenes, 0 test/rollback idempotency keys;
+- создание Образа отдельно проверено транзакционно в живой БД: entity + normalized parameters создаются корректно, затем ROLLBACK оставляет 0 test rows;
+- создание Сцены отдельно проверено транзакционно: `scene-state-v3`, reference flags, normalized parameters и `background_slug -> backgrounds.id` UUID relation работают, затем ROLLBACK оставляет 0 test rows/keys;
+- DEV device verification сделана обязательной частью успешного deployment: Desktop Chrome, iOS WebKit/iPhone 13 и Android Chrome/Pixel 5 больше не являются `continue-on-error` шагами;
+- `deployment/dev=success` теперь выставляется только после build, tests, FTPS remote SHA check, HTTP smoke и всех трех device/browser verification;
+- Supabase Security Advisor повторно проверен. Публичные mutation `SECURITY DEFINER` предупреждения оставлены сознательно как следствие явно выбранной общей public/no-account модели; `audit_log` и `mutation_requests` остаются закрытыми внутренними таблицами с RLS без публичных write policies.
+
 ### MCP deployment and end-to-end validation
 
 - добавлен настоящий remote MCP server `supabase/functions/charactermaker-mcp/index.ts`;
