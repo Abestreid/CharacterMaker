@@ -59,16 +59,23 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: |
+          echo "DEPLOY_STAGE=dependencies" >> "$GITHUB_ENV"
+          npm install --no-audit --no-fund
 
       - name: Typecheck and tests
-        run: npm run check
+        run: |
+          echo "DEPLOY_STAGE=checks" >> "$GITHUB_ENV"
+          npm run check
 
       - name: Production build
-        run: npm run build
+        run: |
+          echo "DEPLOY_STAGE=build" >> "$GITHUB_ENV"
+          npm run build
 
       - name: Add DEV noindex protection
         run: |
+          echo "DEPLOY_STAGE=noindex" >> "$GITHUB_ENV"
           python - <<'PY'
           from pathlib import Path
 
@@ -89,6 +96,7 @@ jobs:
 
       - name: Validate deploy target
         run: |
+          echo "DEPLOY_STAGE=target-validation" >> "$GITHUB_ENV"
           test "$DEPLOY_DIR" = "/htdocs/dev" || {
             echo "Unsafe DEV deploy path: $DEPLOY_DIR"
             exit 1
@@ -98,7 +106,10 @@ jobs:
 
       - name: Install FTPS client
         working-directory: .
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+        run: |
+          echo "DEPLOY_STAGE=ftps-client" >> "$GITHUB_ENV"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lftp
 
       - name: Deploy DEV over FTPS Explicit TLS
         env:
@@ -106,6 +117,7 @@ jobs:
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
+          echo "DEPLOY_STAGE=ftps-deploy" >> "$GITHUB_ENV"
           test -n "$FTP_SERVER"
           test -n "$FTP_USERNAME"
           test -n "$FTP_PASSWORD"
@@ -127,6 +139,7 @@ jobs:
       - name: Verify DEV URL
         working-directory: .
         run: |
+          echo "DEPLOY_STAGE=http-verify" >> "$GITHUB_ENV"
           curl --fail --location --silent --show-error \
             --retry 5 --retry-delay 5 --retry-all-errors \
             "$DEPLOY_URL" -o /tmp/charactermaker-dev.html
@@ -158,16 +171,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          payload=$(jq -n \
-            --arg state failure \
-            --arg target_url "$DEPLOY_URL" \
-            --arg description "CharacterMaker V2 DEV deployment failed" \
-            --arg context "deployment/dev" \
-            '{state:$state,target_url:$target_url,description:$description,context:$context}')
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "$payload" >/dev/null
+          stage="${DEPLOY_STAGE:-unknown}"
+          for context in "deployment/dev" "deployment/dev/failure/$stage"; do
+            payload=$(jq -n \
+              --arg state failure \
+              --arg target_url "$DEPLOY_URL" \
+              --arg description "CharacterMaker V2 DEV failed at $stage" \
+              --arg context "$context" \
+              '{state:$state,target_url:$target_url,description:$description,context:$context}')
+            curl --fail-with-body --silent --show-error \
+              -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -d "$payload" >/dev/null
+          done
