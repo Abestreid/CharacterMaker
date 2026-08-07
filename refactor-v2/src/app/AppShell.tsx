@@ -22,7 +22,7 @@ import { useEditorStore } from '../store/editor-store';
 
 const navigation = [
   { to: '/character', label: 'Персона', icon: PersonStanding },
-  { to: '/wardrobe', label: 'Гардероб', icon: Shirt },
+  { to: '/wardrobe', label: 'Образ', icon: Shirt },
   { to: '/scene', label: 'Сцена', icon: Camera },
   { to: '/results', label: 'Результаты', icon: Images },
 ] as const;
@@ -46,7 +46,7 @@ export function AppShell() {
           <ThemeToggle />
           <div>
             <p className="text-xs font-medium text-foreground">CharacterMaker V2</p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">Черновик редактора автоматически хранится локально. Пресеты сохраняются отдельно в Supabase.</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">Черновик редактора автоматически хранится локально. Пресеты сохраняются в общей библиотеке Supabase.</p>
           </div>
         </div>
       </aside>
