@@ -1,5 +1,5 @@
 import type { CharacterState, SceneState, WardrobeState } from '../../domain';
-import type { ParameterValueInput, PresetPayload } from './preset.repository';
+import type { AiContext, ParameterValueInput, PresetPayload } from './preset.repository';
 
 const option = (catalog_id: string, option_id: string, position = 0): ParameterValueInput => ({ catalog_id, option_id, position });
 const bool = (catalog_id: string, boolean_value: boolean, position = 0): ParameterValueInput => ({ catalog_id, boolean_value, position });
@@ -11,6 +11,8 @@ export type PresetIdentity = {
   name: string;
   slug: string;
   description?: string | null;
+  expectedVersion?: number;
+  aiContext?: AiContext;
 };
 
 export function characterStateToPreset(identity: PresetIdentity, state: CharacterState): PresetPayload {
@@ -41,19 +43,30 @@ export function characterStateToPreset(identity: PresetIdentity, state: Characte
     bool('has_tattoos', state.tattoos.enabled),
   ];
 
+  if (state.body.breastSizeId) parameters.push(option('breast_size', state.body.breastSizeId));
   if (state.body.breastShapeId) parameters.push(option('breast_shape', state.body.breastShapeId));
   if (state.body.breastFirmnessId) parameters.push(option('breast_firmness', state.body.breastFirmnessId));
   if (state.body.buttockShapeId) parameters.push(option('buttock_shape', state.body.buttockShapeId));
   if (state.body.buttockFirmnessId) parameters.push(option('buttock_firmness', state.body.buttockFirmnessId));
+  if (state.appearance.skinDetails.trim()) parameters.push(text('skin_details', state.appearance.skinDetails.trim()));
+  if (state.appearance.hair.details.trim()) parameters.push(text('hair_details', state.appearance.hair.details.trim()));
   if (state.makeup.enabled) {
     if (state.makeup.eyelinerStyleId) parameters.push(option('eyeliner_style', state.makeup.eyelinerStyleId));
     if (state.makeup.eyeshadowColorId) parameters.push(option('eyeshadow_color', state.makeup.eyeshadowColorId));
     if (state.makeup.lipstickColorId) parameters.push(option('lipstick_color', state.makeup.lipstickColorId));
+    if (state.makeup.details.trim()) parameters.push(text('makeup_details', state.makeup.details.trim()));
   }
   if (state.tattoos.enabled && state.tattoos.description.trim()) parameters.push(text('tattoo_description', state.tattoos.description.trim()));
+  if (state.permanentFeatures.trim()) parameters.push(text('permanent_features', state.permanentFeatures.trim()));
 
   return {
-    ...identity,
+    id: identity.id,
+    name: identity.name,
+    slug: identity.slug,
+    description: identity.description,
+    expected_version: identity.expectedVersion,
+    schema_version: 'character-state-v3',
+    ai_context: identity.aiContext ?? {},
     age: state.identity.age,
     height_cm: state.body.height,
     weight_kg: state.body.weight,
@@ -62,7 +75,7 @@ export function characterStateToPreset(identity: PresetIdentity, state: Characte
     hips_cm: state.body.hips,
     body_fat_percent: state.body.bodyFat,
     parameters,
-    metadata: { editor_schema: 'character-state-v2', editor_state: state },
+    metadata: { editor_schema: 'character-state-v3', editor_state: state },
   };
 }
 
@@ -83,7 +96,13 @@ export function wardrobeStateToOutfitPreset(identity: PresetIdentity, state: War
   if (state.customDescription.trim()) parameters.push(text('accessories_custom', state.customDescription.trim()));
 
   return {
-    ...identity,
+    id: identity.id,
+    name: identity.name,
+    slug: identity.slug,
+    description: identity.description,
+    expected_version: identity.expectedVersion,
+    schema_version: 'wardrobe-state-v2',
+    ai_context: identity.aiContext ?? {},
     parameters,
     metadata: {
       editor_schema: 'wardrobe-state-v2',
@@ -124,15 +143,22 @@ export function sceneStateToPreset(identity: PresetIdentity, state: SceneState):
   };
 
   return {
-    ...identity,
+    id: identity.id,
+    name: identity.name,
+    slug: identity.slug,
+    description: identity.description,
+    expected_version: identity.expectedVersion,
+    schema_version: 'scene-state-v3',
+    ai_context: identity.aiContext ?? {},
+    background_slug: state.environment.backgroundId,
     custom_background_text: state.environment.customBackground.trim() || null,
+    reference_use_clothing: state.reference.useClothing,
+    reference_use_expression: state.reference.useExpression,
     parameters,
     metadata: {
-      editor_schema: 'scene-state-v2',
+      editor_schema: 'scene-state-v3',
       editor_state: editorState,
       character_mode: state.character.mode,
-      use_clothing_from_reference: state.reference.useClothing,
-      use_expression_from_reference: state.reference.useExpression,
       has_reference_image: Boolean(state.reference.image),
     },
   };
