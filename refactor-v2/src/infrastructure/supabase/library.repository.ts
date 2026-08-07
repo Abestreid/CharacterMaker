@@ -24,6 +24,8 @@ export type PublicOutfitPreset = {
   promptText: string | null;
 };
 
+export type PublicWardrobeItem = PublicOutfitPreset;
+
 export type PublicBackground = {
   id: string;
   slug: string;
@@ -93,6 +95,8 @@ export async function fetchPublicOutfits(): Promise<PublicOutfitPreset[]> {
     promptText: row.prompt_text,
   }));
 }
+
+export const fetchPublicWardrobeItems = fetchPublicOutfits;
 
 export async function fetchPublicBackgrounds(): Promise<PublicBackground[]> {
   const { data, error } = await supabase
