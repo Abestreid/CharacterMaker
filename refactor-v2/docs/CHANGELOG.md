@@ -4,6 +4,25 @@
 
 ## 2026-08-07
 
+### Preset workspace UI, live preview and DEV stabilization
+
+- перед UI-refactor создана backup-ветка `backup/pre-ui-preset-manager-20260807`;
+- большой inline `PresetManager` заменен компактным toolbar, поэтому загрузка пресета больше не создает layout shift и не выталкивает редактор вниз;
+- выбор пресета перенесен в responsive picker: desktop dialog + mobile bottom sheet, добавлены поиск и загрузка одним нажатием;
+- полный CRUD и media tools сохранены: создание, обновление, сохранение как новый, архивирование, refresh, JPEG/PNG/WebP upload, все asset roles, `is_primary`, все `reference_status`, обновление статуса и удаление asset;
+- Preset UI синхронизирован с `activeCharacterId`, `activeOutfitId`, `activeSceneId`;
+- desktop и mobile preview теперь показывают имя и реальный primary/cover/portrait asset активной Персоны с InfinityFree;
+- desktop workspace оптимизирован под широкие экраны: sidebar 240 px, workspace до 1680 px, sticky preview 340 px;
+- ThemeToggle в sidebar сделан компактным без переполнения;
+- восстановлен документированный Web partial-update contract: существующие Персона/Образ/Сцена обновляются через `public_patch_preset`, а не полным overwrite;
+- `buildStatePatch` снова формирует только реальные top-level и normalized parameter changes, включая delete patch для удаленных параметров;
+- регрессионная проверка прошла: TypeScript typecheck успешно, Vitest 60/60 tests успешно, production Vite build успешно;
+- диагностикой DEV подтверждено: build, FTPS deploy и remote SHA verification проходили, ложный failure создавал нестабильный HTTP smoke InfinityFree;
+- HTTP smoke усилен browser-like User-Agent и повторными попытками после FTP deploy;
+- итоговый `deployment/dev` снова проходит полный обязательный pipeline, включая HTTP smoke и visual verification Desktop Chrome, iOS WebKit/iPhone 13 и Android Chrome/Pixel 5;
+- подробная запись: `docs/changes/2026-08-07-preset-workspace-ui.md`;
+- backup note: `docs/backups/2026-08-07-pre-preset-workspace-ui.md`.
+
 ### Removal of discarded Supabase Storage artifacts
 
 - подтверждено `storage.objects = 0` перед удалением;
