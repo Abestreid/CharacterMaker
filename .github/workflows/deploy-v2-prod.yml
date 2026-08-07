@@ -60,67 +60,85 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: |
+          echo "DEPLOY_STAGE=dependencies" >> "$GITHUB_ENV"
+          npm install --no-audit --no-fund
 
       - name: Typecheck and tests
-        run: npm run check
+        run: |
+          echo "DEPLOY_STAGE=checks" >> "$GITHUB_ENV"
+          npm run check
 
       - name: Production build
-        run: npm run build
-
-      - name: Validate deploy target
         run: |
+          echo "DEPLOY_STAGE=build" >> "$GITHUB_ENV"
+          npm run build
+
+      - name: Validate production build and target
+        run: |
+          echo "DEPLOY_STAGE=target-validation" >> "$GITHUB_ENV"
           test "$DEPLOY_DIR" = "/htdocs" || {
             echo "Unsafe PROD deploy path: $DEPLOY_DIR"
             exit 1
           }
           test -f dist/index.html
           test -d dist/assets
-          ! grep -q 'noindex,nofollow,noarchive' dist/index.html || {
+          if grep -q 'noindex,nofollow,noarchive' dist/index.html; then
             echo "Production build unexpectedly contains DEV noindex"
             exit 1
-          }
+          fi
 
-      - name: Install FTPS client
+      - name: Set FTPS deployment stage
         working-directory: .
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+        run: echo "DEPLOY_STAGE=ftps-deploy" >> "$GITHUB_ENV"
 
       - name: Deploy PROD over FTPS Explicit TLS
-        env:
-          FTP_SERVER: ${{ secrets.FTP_SERVER }}
-          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
-          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-        run: |
-          test -n "$FTP_SERVER"
-          test -n "$FTP_USERNAME"
-          test -n "$FTP_PASSWORD"
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          security: loose
+          timeout: 120000
+          local-dir: ./refactor-v2/dist/
+          server-dir: /htdocs/
+          state-name: .ftp-deploy-sync-state-prod-v2.json
+          dangerous-clean-slate: false
+          log-level: standard
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            dev/
+            dev/**
 
-          # Deliberately no --delete here: /htdocs/dev must never be removed
-          # by a production deployment.
-          lftp <<EOF
-          set cmd:fail-exit yes
-          set ftp:ssl-force true
-          set ftp:ssl-protect-data true
-          set ftp:passive-mode true
-          set ssl:verify-certificate no
-          set net:max-retries 3
-          set net:timeout 25
-          open -p 21 -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER"
-          mirror --reverse --verbose --parallel=2 dist $DEPLOY_DIR
-          bye
-          EOF
+      - name: Setup Chrome for browser verification
+        uses: browser-actions/setup-chrome@v2.1.2
+        with:
+          chrome-version: stable
 
-      - name: Verify PROD URL
+      - name: Verify PROD URL in real browser
         working-directory: .
         run: |
-          curl --fail --location --silent --show-error \
-            --retry 5 --retry-delay 5 --retry-all-errors \
-            "$DEPLOY_URL" -o /tmp/charactermaker-prod.html
+          echo "DEPLOY_STAGE=browser-verify" >> "$GITHUB_ENV"
+          chrome --version
+          chrome \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --virtual-time-budget=15000 \
+            --dump-dom \
+            "$DEPLOY_URL" > /tmp/charactermaker-prod.html
+
           if grep -q 'noindex,nofollow,noarchive' /tmp/charactermaker-prod.html; then
             echo "Production URL unexpectedly contains DEV noindex"
             exit 1
           fi
-          echo "PROD deployment verified: $DEPLOY_URL"
+          grep -q 'AI Character Maker V2' /tmp/charactermaker-prod.html || \
+            grep -q 'CharacterMaker' /tmp/charactermaker-prod.html
+          echo "PROD browser verification passed: $DEPLOY_URL"
 
       - name: Mark deployment success
         working-directory: .
@@ -130,7 +148,7 @@ jobs:
           payload=$(jq -n \
             --arg state success \
             --arg target_url "$DEPLOY_URL" \
-            --arg description "CharacterMaker V2 PROD deployed and verified" \
+            --arg description "CharacterMaker V2 PROD deployed and browser-verified" \
             --arg context "deployment/prod" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
@@ -147,16 +165,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          payload=$(jq -n \
-            --arg state failure \
-            --arg target_url "$DEPLOY_URL" \
-            --arg description "CharacterMaker V2 PROD deployment failed" \
-            --arg context "deployment/prod" \
-            '{state:$state,target_url:$target_url,description:$description,context:$context}')
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "$payload" >/dev/null
+          stage="${DEPLOY_STAGE:-unknown}"
+          for context in "deployment/prod" "deployment/prod/failure/$stage"; do
+            payload=$(jq -n \
+              --arg state failure \
+              --arg target_url "$DEPLOY_URL" \
+              --arg description "CharacterMaker V2 PROD failed at $stage" \
+              --arg context "$context" \
+              '{state:$state,target_url:$target_url,description:$description,context:$context}')
+            curl --fail-with-body --silent --show-error \
+              -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -d "$payload" >/dev/null
+          done
