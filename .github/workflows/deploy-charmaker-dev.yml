@@ -65,8 +65,8 @@ jobs:
             set net:timeout 20;
             open -p 21 ftp://$FTP_SERVER;
             user $FTP_USERNAME $FTP_PASSWORD;
-            mkdir -p /htdocs/dev;
-            mirror --reverse --delete --verbose --parallel=4 --create-dirs dist/ /htdocs/dev/;
+            cd /htdocs/dev;
+            mirror --reverse --delete --verbose --parallel=4 dist/ .;
             bye
           "
 
