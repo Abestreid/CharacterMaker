@@ -4,6 +4,59 @@
 
 ## 2026-08-07
 
+### MCP deployment and end-to-end validation
+
+- добавлен настоящий remote MCP server `supabase/functions/charactermaker-mcp/index.ts`;
+- MCP развернут как бесплатная Supabase Edge Function `charactermaker-mcp` в существующем проекте `charmaker`;
+- текущий endpoint: `https://kszybiwhchwekpmramxn.supabase.co/functions/v1/charactermaker-mcp`;
+- `verify_jwt=false` выбран намеренно, поскольку текущая продуктовая модель остается общей публичной библиотекой без аккаунтов/ролей;
+- реализованы read tools: `search_presets`, `get_preset`, `get_catalog`, `get_schema`, `build_generation_context`, `list_assets`, `get_asset`;
+- реализованы write tools: `create_character`, `create_outfit`, `create_scene`, `patch_preset`, `import_asset_from_url`, `set_asset_reference_status`, `archive_preset`;
+- `get_asset` умеет возвращать реальное изображение через MCP image content;
+- `import_asset_from_url` умеет перенести публично доступное JPEG/PNG/WebP изображение на InfinityFree и создать asset relation в Supabase;
+- добавлен true partial RPC `public_patch_preset`, чтобы MCP мог менять один параметр без полной перезаписи сущности;
+- `public_patch_preset` поддерживает optimistic version, idempotency, parameter upsert/delete и `mutation_source=mcp` для audit;
+- удален последний устаревший DB RPC `admin_validate_token`; старый `admin-presets` Edge Function остается только 410 Gone compatibility artifact;
+- создана подробная документация `docs/MCP_ARCHITECTURE.md`;
+- PR #1 полностью актуализирован под фактическую архитектуру V2 и MCP.
+
+### MCP protocol smoke validation
+
+Добавлен постоянный внешний workflow `.github/workflows/mcp-smoke.yml`.
+
+GitHub runner фактически подтвердил:
+
+- health endpoint -> HTTP 200;
+- MCP `initialize` -> успешно;
+- полный initialize/initialized handshake с учетом `Mcp-Session-Id`;
+- `tools/list` -> успешно;
+- `search_presets` -> реальное чтение Персоны `Лайвет` из Supabase;
+- `get_catalog(eye_color)` -> реальный каталог из Supabase;
+- `get_asset(include_image=true)` -> реальное изображение возвращается как MCP image content;
+- commit status `mcp/smoke` -> success.
+
+Первый smoke-run обнаружил корректно работающий `health` и `initialize`, но `tools/list` получил HTTP 400 из-за неполного клиентского handshake. Workflow был исправлен: теперь сохраняет session id, отправляет `notifications/initialized`, после чего `tools/list` и tool calls проходят успешно.
+
+### MCP write validation
+
+Одноразовый внешний GitHub workflow проверил через опубликованный MCP endpoint полный цикл:
+
+1. `create_character` создал временную публичную Персону;
+2. `get_preset` подтвердил исходные поля и `eye_color=green`;
+3. `patch_preset` изменил только `eye_color` на `blue` и `ai_context`, версия стала `2`;
+4. повторный `get_preset` подтвердил, что `age=25` и `gender=female` сохранились без перезаписи;
+5. `archive_preset` скрыл fixture из активной библиотеки;
+6. commit status `mcp/write-test` -> success.
+
+После успешной проверки временная Персона была полностью удалена из БД вместе с ее test audit/idempotency записями. Проверено `remaining_fixture=0`. Одноразовый workflow затем удален из Git, поэтому тестовые записи не будут создаваться на будущих push.
+
+### Mobile/DEV verification
+
+- deployment workflow расширен отдельными визуальными профилями Desktop Chrome, iOS WebKit (`iPhone 13`) и Android Chrome (`Pixel 5`);
+- screenshots сохраняются как GitHub Actions artifact;
+- web pipeline продолжает выполнять typecheck, Vitest, production build, FTPS deploy и remote commit SHA verification;
+- динамический browser `theme-color` уже корректно реализован в ThemeProvider, поэтому лишняя повторная правка не вносилась.
+
 ### Core/MCP consistency corrections
 
 - фактическая Supabase БД и TypeScript domain приведены к одному набору character-параметров;
@@ -24,30 +77,21 @@
 - создан единый application facade `src/core/character-maker.service.ts`;
 - Preset UI переведен с прямых infrastructure imports на общий Core;
 - Catalogs UI переведен на Core и сохраняет Supabase как основной источник;
-- обычное Web-обновление сохраняет существующий `ai_context`, чтобы не уничтожать будущие MCP-инструкции;
+- обычное Web-обновление сохраняет существующий `ai_context`, чтобы не уничтожать MCP-инструкции;
 - создан `src/core/context.service.ts` с MCP-ready Entity Context и `generation-context-v1`;
 - Context Builder отдает стабильные ID вместе с русскими label, AI context и asset metadata;
 - удалена неподдерживаемая video-вкладка из Results;
 - пользовательская терминология унифицирована как `Персона -> Образ -> Сцена -> Результаты`;
 - основной README и Supabase README переписаны под фактическую архитектуру;
-- старый `admin-presets` flow отмечен как deprecated и больше не описывается как активный;
-- подтверждено, что динамический browser `theme-color` уже корректно реализован в ThemeProvider, поэтому лишняя правка не вносилась.
+- старый `admin-presets` flow отмечен как deprecated и больше не описывается как активный.
 
-### Validation / deployment
+### Database migrations
 
-- после основного Core/database пакета GitHub Actions успешно прошел TypeScript typecheck, Vitest, production build, FTPS deployment и remote commit verification;
-- DEV продолжает автоматически проверяться desktop/iPhone screenshot steps в deployment workflow;
-- последующие небольшие Core/docs изменения также проходят через тот же обязательный pipeline.
+Применены в Supabase и сохранены в Git:
 
-### Database migration
-
-Применена и сохранена в Git migration:
-
-`supabase/migrations/202608071600_core_mcp_readiness.sql`
-
-Supabase migration name:
-
-`core_mcp_readiness_20260807`
+- `supabase/migrations/202608071600_core_mcp_readiness.sql` -> `core_mcp_readiness_20260807`;
+- `supabase/migrations/202608071635_remove_deprecated_admin_token_rpc.sql` -> `remove_deprecated_admin_token_rpc_20260807`;
+- `supabase/migrations/202608071650_add_public_patch_preset.sql` -> `add_public_patch_preset_20260807`.
 
 ### Backup before Core/MCP corrections
 
