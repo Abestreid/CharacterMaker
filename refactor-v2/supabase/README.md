@@ -6,16 +6,20 @@ Project ref: `kszybiwhchwekpmramxn`
 
 Region: `eu-central-1`
 
-## Principles
+## Fixed architecture
 
 - `main` remains the legacy CharacterMaker source and is not part of V2 deployment.
-- V2 frontend reads public data through the Supabase publishable key.
+- V2 frontend reads public structured data through the Supabase publishable key.
+- Supabase is used only for PostgreSQL data/API and RLS.
+- All photos and other binary files are stored on the InfinityFree hosting used by CharacterMaker and are published through normal hosting paths/URLs.
+- Supabase Storage is not part of the CharacterMaker media architecture.
+- Cloudflare R2/S3 is not part of the CharacterMaker media architecture.
+- Video is not part of the CharacterMaker product or database model.
+- PostgreSQL stores file metadata and relations only: hosting path, public URL, MIME type, dimensions, size, role and ownership relation.
 - Database passwords and service-role keys must never be committed to GitHub or exposed to the browser.
 - Phase 1 has no CharacterMaker user accounts or authentication.
 - Anonymous/authenticated browser roles have read-only access to public active data.
-- Writes are blocked both by SQL privileges and by RLS; trusted administration/backend tooling handles mutations.
-- Binary media is stored in object storage; PostgreSQL stores metadata and relationships.
-- The `assets.storage_provider` field supports `supabase`, `r2`, and `external` so media storage can migrate later without redesigning the domain model.
+- Writes are blocked both by SQL privileges and RLS; trusted administration/backend tooling handles mutations.
 
 ## Main tables
 
@@ -32,7 +36,7 @@ Flexible entity values:
 - `background_parameter_values`
 - `scene_preset_parameter_values`
 
-Core measurements such as age, height, weight, bust, waist, hips, and body-fat percentage remain normal columns on `characters` rather than generic EAV values.
+Core measurements such as age, height, weight, bust, waist, hips and body-fat percentage remain normal columns on `characters` rather than generic EAV values.
 
 ### Public libraries
 
@@ -42,7 +46,7 @@ Core measurements such as age, height, weight, bust, waist, hips, and body-fat p
 - `scene_presets`
 - `tags`
 
-### Media
+### Files and images
 
 - `assets`
 - `asset_variants`
@@ -50,11 +54,15 @@ Core measurements such as age, height, weight, bust, waist, hips, and body-fat p
 - `wardrobe_assets`
 - `background_assets`
 
-Character asset roles include portrait, face close-up, full front, full back, left/right profile, cover and references.
+`assets.storage_provider` is `infinityfree` for CharacterMaker-hosted files or `external` only for intentionally external references.
 
-Wardrobe asset roles include cover, front, back, side, detail, texture, on-model and references.
+For InfinityFree assets, `object_path` stores the hosting-relative path and `public_url` stores the public URL when available.
 
-Background asset roles include cover, preview, reference, plate, mask, depth and panorama.
+Character image roles include portrait, face close-up, full front, full back, left/right profile, cover and references.
+
+Wardrobe image roles include cover, front, back, side, detail, texture, on-model and references.
+
+Background image roles include cover, preview, reference, plate, mask, depth and panorama.
 
 ### Relations
 
@@ -63,25 +71,15 @@ Background asset roles include cover, preview, reference, plate, mask, depth and
 - `wardrobe_tags`
 - `background_tags`
 
-### Generations
+### Image generations
 
 - `generations`
 - `generation_sources`
 - `generation_assets`
 
-A generation records provider, model, prompt, settings, request/response metadata and status. `generation_sources` links it to characters, wardrobe, backgrounds and reference assets. `generation_assets` links generated images/videos, variations, previews and upscales.
+A generation records provider, model, prompt, settings, request/response metadata and status. `generation_sources` links it to characters, wardrobe, backgrounds and reference assets. `generation_assets` links generated images, thumbnails, variations, previews and upscales.
 
-## Storage buckets
-
-Public read-only catalog/media buckets:
-
-- `catalog-characters`
-- `catalog-wardrobe`
-- `catalog-backgrounds`
-- `generated-images`
-- `generated-videos`
-
-There are no anonymous insert/update/delete policies in phase 1. Public application roles also have their SQL write privileges explicitly revoked.
+Generated image files themselves are stored on InfinityFree, not in Supabase Storage.
 
 ## Applied database migrations
 
@@ -93,6 +91,9 @@ There are no anonymous insert/update/delete policies in phase 1. Public applicat
 6. `add_asset_variants_scene_presets_and_character_wardrobe`
 7. `add_foreign_key_indexes`
 8. `harden_public_roles_read_only`
+9. `align_media_schema_with_infinityfree_images_only`
+
+Migration 9 supersedes the initial media-storage assumptions from migrations 1-2: the active model is InfinityFree-hosted files, no Supabase Storage usage and no video model.
 
 ## Current seeded catalogs
 
