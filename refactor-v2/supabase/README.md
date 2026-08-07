@@ -331,6 +331,14 @@ The existing schema supports provenance links from a generation to:
 
 The V2 Results UI currently represents images only. Generation-provider integration is a later layer and must consume the shared generation-context contract rather than legacy Gemini-specific state.
 
+## Supabase Storage cleanup
+
+CharacterMaker does not use Supabase Storage. Before removal, `storage.objects` was asserted to contain zero rows. All remaining empty legacy buckets from the discarded early design were then deleted by migration:
+
+`supabase/migrations/202608071720_remove_unused_storage_buckets.sql`
+
+Current media architecture remains InfinityFree `/media/...` plus Supabase `assets` metadata/relations.
+
 ## Backups
 
 Before the 2026-08-07 Core/MCP consistency corrections:
@@ -356,7 +364,7 @@ The following are historical and not active architecture:
 
 - old `admin-presets` editing-key flow;
 - old `admin_validate_token` RPC;
-- empty Supabase Storage buckets from the discarded storage design;
+- discarded Supabase Storage experiment; its empty legacy buckets were removed by `202608071720_remove_unused_storage_buckets.sql`;
 - Cloudflare R2/S3 proposal;
 - video-related schema/UI assumptions.
 

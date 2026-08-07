@@ -4,6 +4,13 @@
 
 ## 2026-08-07
 
+### Removal of discarded Supabase Storage artifacts
+
+- подтверждено `storage.objects = 0` перед удалением;
+- все оставшиеся пустые legacy Supabase Storage buckets удалены;
+- применена и сохранена в Git migration `202608071720_remove_unused_storage_buckets.sql`;
+- текущая media architecture окончательно остается InfinityFree `/media/...` + Supabase `assets` metadata/relations, без Supabase Storage.
+
 ### Final audit and mandatory device verification
 
 - финальная проверка данных подтвердила: 68 catalogs, 584 catalog options, 55 backgrounds, 3 исторические character records, из которых только `Лайвет` была active/public уже в исходном backup;
