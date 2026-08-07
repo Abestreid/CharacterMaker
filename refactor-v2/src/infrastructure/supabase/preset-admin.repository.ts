@@ -1,5 +1,5 @@
+import { callAdminApi } from '../admin/admin-api';
 import { requireAdminToken } from '../admin/admin-session';
-import { supabase } from './client';
 
 export type PresetKind = 'character' | 'outfit' | 'scene';
 export type AssetOwnerKind = PresetKind | 'background' | 'generation';
@@ -55,32 +55,27 @@ export type AttachAssetInput = {
 
 export async function savePreset(kind: PresetKind, payload: PresetPayload): Promise<string> {
   const token = requireAdminToken();
-  const { data, error } = await supabase.rpc('admin_upsert_preset', {
-    p_token: token,
+  const response = await callAdminApi<string>(token, 'upsert_preset', {
     p_kind: kind,
     p_payload: payload,
   });
-  if (error) throw error;
-  if (typeof data !== 'string') throw new Error('Supabase не вернул ID сохраненного пресета.');
-  return data;
+  if (typeof response.data !== 'string') throw new Error('Supabase не вернул ID сохраненного пресета.');
+  return response.data;
 }
 
 export async function deletePreset(kind: PresetKind, id: string, hard = false): Promise<boolean> {
   const token = requireAdminToken();
-  const { data, error } = await supabase.rpc('admin_delete_preset', {
-    p_token: token,
+  const response = await callAdminApi<boolean>(token, 'delete_preset', {
     p_kind: kind,
     p_id: id,
     p_hard: hard,
   });
-  if (error) throw error;
-  return data === true;
+  return response.data === true;
 }
 
 export async function attachInfinityFreeAsset(input: AttachAssetInput): Promise<string> {
   const token = requireAdminToken();
-  const { data, error } = await supabase.rpc('admin_attach_asset', {
-    p_token: token,
+  const response = await callAdminApi<string>(token, 'attach_asset', {
     p_owner_kind: input.ownerKind,
     p_owner_id: input.ownerId,
     p_role: input.role,
@@ -94,29 +89,22 @@ export async function attachInfinityFreeAsset(input: AttachAssetInput): Promise<
     p_is_primary: input.isPrimary ?? false,
     p_metadata: input.metadata ?? {},
   });
-  if (error) throw error;
-  if (typeof data !== 'string') throw new Error('Supabase не вернул ID файла.');
-  return data;
+  if (typeof response.data !== 'string') throw new Error('Supabase не вернул ID файла.');
+  return response.data;
 }
 
 export async function deleteAssetMetadata(assetId: string): Promise<boolean> {
   const token = requireAdminToken();
-  const { data, error } = await supabase.rpc('admin_delete_asset', {
-    p_token: token,
-    p_asset_id: assetId,
-  });
-  if (error) throw error;
-  return data === true;
+  const response = await callAdminApi<boolean>(token, 'delete_asset', { p_asset_id: assetId });
+  return response.data === true;
 }
 
 export async function setCharacterOutfit(characterId: string, outfitPresetId: string, isDefault = false): Promise<boolean> {
   const token = requireAdminToken();
-  const { data, error } = await supabase.rpc('admin_set_character_outfit', {
-    p_token: token,
+  const response = await callAdminApi<boolean>(token, 'set_character_outfit', {
     p_character_id: characterId,
     p_outfit_preset_id: outfitPresetId,
     p_is_default: isDefault,
   });
-  if (error) throw error;
-  return data === true;
+  return response.data === true;
 }
