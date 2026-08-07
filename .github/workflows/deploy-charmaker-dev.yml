@@ -66,7 +66,7 @@ jobs:
             open -p 21 ftp://$FTP_SERVER;
             user $FTP_USERNAME $FTP_PASSWORD;
             cd /htdocs/dev;
-            mirror --reverse --delete --verbose --parallel=4 dist/ .;
+            mirror --reverse --delete --no-perms --verbose --parallel=4 dist/ .;
             bye
           "
 
