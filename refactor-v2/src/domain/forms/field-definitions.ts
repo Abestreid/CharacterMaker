@@ -10,6 +10,7 @@ export const CHARACTER_FIELDS = [
   { id: 'body.hips', label: 'Обхват бедер', control: 'number', numericParameterKey: 'character.hips', required: true },
   { id: 'body.bodyFat', label: 'Процент жира', control: 'number', numericParameterKey: 'character.bodyFat', required: true },
   { id: 'body.muscleMassId', label: 'Мышечная масса', control: 'select', catalogKey: 'character.muscleMass', required: true },
+  { id: 'body.breastSizeId', label: 'Размер груди', control: 'select', catalogKey: 'character.breastSizes', visibleWhen: { fieldId: 'identity.genderId', operator: 'equals', value: 'female' } },
   { id: 'body.breastShapeId', label: 'Форма груди', control: 'select', catalogKey: 'character.breastShapes', visibleWhen: { fieldId: 'identity.genderId', operator: 'equals', value: 'female' } },
   { id: 'body.breastFirmnessId', label: 'Упругость груди', control: 'select', catalogKey: 'character.breastFirmness', visibleWhen: { fieldId: 'identity.genderId', operator: 'equals', value: 'female' } },
   { id: 'body.buttockShapeId', label: 'Форма ягодиц', control: 'select', catalogKey: 'character.buttockShapes', visibleWhen: { fieldId: 'identity.genderId', operator: 'equals', value: 'female' } },
@@ -17,11 +18,13 @@ export const CHARACTER_FIELDS = [
   { id: 'appearance.imageStyleId', label: 'Стиль изображения', control: 'select', catalogKey: 'shared.imageStyles', required: true, searchable: true },
   { id: 'appearance.ethnicityId', label: 'Этнический тип', control: 'select', catalogKey: 'character.ethnicities', required: true },
   { id: 'appearance.skinToneId', label: 'Тон кожи', control: 'select', catalogKey: 'character.skinTones', required: true },
+  { id: 'appearance.skinDetails', label: 'Дополнительное описание кожи', control: 'textarea' },
   { id: 'appearance.eyeColorId', label: 'Цвет глаз', control: 'select', catalogKey: 'character.eyeColors', required: true },
   { id: 'appearance.hair.lengthId', label: 'Длина волос', control: 'select', catalogKey: 'character.hairLengths', required: true },
   { id: 'appearance.hair.typeId', label: 'Тип волос', control: 'select', catalogKey: 'character.hairTypes', required: true },
   { id: 'appearance.hair.hairstyleId', label: 'Прическа', control: 'select', catalogKey: 'character.hairstyles', required: true },
   { id: 'appearance.hair.colorId', label: 'Цвет волос', control: 'select', catalogKey: 'character.hairColors', required: true },
+  { id: 'appearance.hair.details', label: 'Дополнительное описание волос', control: 'textarea' },
   { id: 'face.headShapeId', label: 'Форма головы', control: 'select', catalogKey: 'character.headShapes', required: true },
   { id: 'face.foreheadSizeId', label: 'Лоб', control: 'select', catalogKey: 'character.foreheadSizes', required: true },
   { id: 'face.eyebrowShapeId', label: 'Форма бровей', control: 'select', catalogKey: 'character.eyebrowShapes', required: true },
@@ -38,8 +41,10 @@ export const CHARACTER_FIELDS = [
   { id: 'makeup.eyelinerStyleId', label: 'Подводка', control: 'select', catalogKey: 'character.eyelinerStyles', visibleWhen: { fieldId: 'makeup.enabled', operator: 'truthy' } },
   { id: 'makeup.eyeshadowColorId', label: 'Тени', control: 'select', catalogKey: 'character.eyeshadowColors', visibleWhen: { fieldId: 'makeup.enabled', operator: 'truthy' } },
   { id: 'makeup.lipstickColorId', label: 'Помада', control: 'select', catalogKey: 'character.lipstickColors', visibleWhen: { fieldId: 'makeup.enabled', operator: 'truthy' } },
+  { id: 'makeup.details', label: 'Дополнительное описание макияжа', control: 'textarea', visibleWhen: { fieldId: 'makeup.enabled', operator: 'truthy' } },
   { id: 'tattoos.enabled', label: 'Татуировки', control: 'boolean' },
   { id: 'tattoos.description', label: 'Описание татуировок', control: 'textarea', placeholder: 'Маленькая роза на левом плече, дракон на всю спину', visibleWhen: { fieldId: 'tattoos.enabled', operator: 'truthy' } },
+  { id: 'permanentFeatures', label: 'Постоянные особенности', control: 'textarea', placeholder: 'Шрамы, родинки и другие признаки, которые нужно сохранять между сценами' },
 ] as const satisfies readonly FieldDefinition[];
 
 export const WARDROBE_FIELDS = [
