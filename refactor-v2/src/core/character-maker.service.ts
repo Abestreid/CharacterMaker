@@ -14,10 +14,14 @@ import {
   attachInfinityFreeAsset,
   deleteAssetMetadata,
   deletePreset,
+  patchPreset,
   savePreset,
   setAssetReferenceStatus,
   type AiContext,
+  type ParameterValueInput,
   type PresetKind,
+  type PresetPatch,
+  type PresetPayload,
   type ReferenceStatus,
 } from '../infrastructure/supabase/preset.repository';
 import {
@@ -63,28 +67,188 @@ export const characterMakerService = {
 } as const;
 
 async function saveCharacter(identity: PresetIdentity, state: CharacterState): Promise<string> {
-  const resolved = await preserveAiContext(identity, fetchPublicCharacters);
-  return savePreset('character', characterStateToPreset(resolved, state));
+  if (!identity.id) return savePreset('character', characterStateToPreset(identity, state));
+
+  const presets = await fetchPublicCharacters();
+  const existing = presets.find((item) => item.id === identity.id);
+  if (!existing) throw new Error(`Персона не найдена: ${identity.id}`);
+  const stored = await loadCharacterState(identity.id);
+  const resolved = resolveIdentity(identity, existing);
+  const baselineIdentity = identityFromExisting(existing);
+  const baseline = characterStateToPreset(baselineIdentity, stored.state);
+  const current = characterStateToPreset(resolved, state);
+  const patch = buildStatePatch('character', baseline, current, resolved, 'character-state-v3');
+  if (!hasPatchChanges(patch)) return identity.id;
+  return patchPreset('character', identity.id, patch, identity.expectedVersion ?? stored.version);
 }
 
 async function saveOutfit(identity: PresetIdentity, state: WardrobeState): Promise<string> {
-  const resolved = await preserveAiContext(identity, fetchPublicOutfits);
-  return savePreset('outfit', wardrobeStateToOutfitPreset(resolved, state));
+  if (!identity.id) return savePreset('outfit', wardrobeStateToOutfitPreset(identity, state));
+
+  const presets = await fetchPublicOutfits();
+  const existing = presets.find((item) => item.id === identity.id);
+  if (!existing) throw new Error(`Образ не найден: ${identity.id}`);
+  const stored = await loadWardrobeState(identity.id);
+  const resolved = resolveIdentity(identity, existing);
+  const baselineIdentity = identityFromExisting(existing);
+  const baseline = wardrobeStateToOutfitPreset(baselineIdentity, stored.state);
+  const current = wardrobeStateToOutfitPreset(resolved, state);
+  const patch = buildStatePatch('outfit', baseline, current, resolved, 'wardrobe-state-v2');
+  if (!hasPatchChanges(patch)) return identity.id;
+  return patchPreset('outfit', identity.id, patch, identity.expectedVersion ?? stored.version);
 }
 
 async function saveScene(identity: PresetIdentity, state: SceneState): Promise<string> {
-  const resolved = await preserveAiContext(identity, fetchPublicScenes);
-  return savePreset('scene', sceneStateToPreset(resolved, state));
+  if (!identity.id) return savePreset('scene', sceneStateToPreset(identity, state));
+
+  const presets = await fetchPublicScenes();
+  const existing = presets.find((item) => item.id === identity.id);
+  if (!existing) throw new Error(`Сцена не найдена: ${identity.id}`);
+  const stored = await loadSceneState(identity.id);
+  const resolved = resolveIdentity(identity, existing);
+  const baselineIdentity = identityFromExisting(existing);
+  const baseline = sceneStateToPreset(baselineIdentity, stored.state);
+  const current = sceneStateToPreset(resolved, state);
+  const patch = buildStatePatch('scene', baseline, current, resolved, 'scene-state-v3');
+  if (!hasPatchChanges(patch)) return identity.id;
+  return patchPreset('scene', identity.id, patch, identity.expectedVersion ?? stored.version);
 }
 
-async function preserveAiContext<T extends { id: string; aiContext: AiContext }>(
+type ExistingPresetIdentity = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  version: number;
+  aiContext: AiContext;
+};
+
+function resolveIdentity(identity: PresetIdentity, existing: ExistingPresetIdentity): PresetIdentity {
+  return {
+    ...identity,
+    id: existing.id,
+    aiContext: identity.aiContext ?? existing.aiContext,
+  };
+}
+
+function identityFromExisting(existing: ExistingPresetIdentity): PresetIdentity {
+  return {
+    id: existing.id,
+    slug: existing.slug,
+    name: existing.name,
+    description: existing.description,
+    expectedVersion: existing.version,
+    aiContext: existing.aiContext,
+  };
+}
+
+const PATCHABLE_TOP_LEVEL_KEYS = [
+  'slug',
+  'name',
+  'description',
+  'schema_version',
+  'ai_context',
+  'age',
+  'height_cm',
+  'weight_kg',
+  'bust_cm',
+  'waist_cm',
+  'hips_cm',
+  'body_fat_percent',
+  'physique_description',
+  'category',
+  'suggested_background_id',
+  'background_id',
+  'background_slug',
+  'custom_background_text',
+  'prompt_text',
+  'reference_use_clothing',
+  'reference_use_expression',
+] as const;
+
+export function buildStatePatch(
+  _kind: PresetKind,
+  baseline: PresetPayload,
+  current: PresetPayload,
   identity: PresetIdentity,
-  list: () => Promise<T[]>,
-): Promise<PresetIdentity> {
-  if (!identity.id || identity.aiContext !== undefined) return identity;
-  const existing = (await list()).find((item) => item.id === identity.id);
-  if (!existing) return identity;
-  return { ...identity, aiContext: existing.aiContext };
+  schemaVersion: string,
+): PresetPatch {
+  const patch: PresetPatch = {};
+  const mutablePatch = patch as Record<string, unknown>;
+  const candidate: PresetPayload = {
+    ...current,
+    name: identity.name,
+    slug: identity.slug,
+    schema_version: schemaVersion,
+  };
+  if (identity.description !== undefined) candidate.description = identity.description;
+  if (identity.aiContext !== undefined) candidate.ai_context = identity.aiContext;
+
+  for (const key of PATCHABLE_TOP_LEVEL_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(candidate, key)) continue;
+    const before = baseline[key as keyof PresetPayload];
+    const after = candidate[key as keyof PresetPayload];
+    if (!deepEqual(before, after)) mutablePatch[key] = after;
+  }
+
+  const parameters = diffParameters(baseline.parameters ?? [], candidate.parameters ?? []);
+  if (parameters.length) patch.parameters = parameters;
+  return patch;
+}
+
+function diffParameters(before: readonly ParameterValueInput[], after: readonly ParameterValueInput[]): ParameterValueInput[] {
+  const beforeByKey = new Map(before.map((item) => [parameterKey(item), item]));
+  const afterByKey = new Map(after.map((item) => [parameterKey(item), item]));
+  const changes: ParameterValueInput[] = [];
+
+  for (const [key, current] of afterByKey) {
+    const previous = beforeByKey.get(key);
+    if (!previous || !sameParameter(previous, current)) changes.push(normalizeParameter(current));
+  }
+
+  for (const [key, previous] of beforeByKey) {
+    if (afterByKey.has(key)) continue;
+    changes.push({ catalog_id: previous.catalog_id, position: previous.position ?? 0, delete: true });
+  }
+
+  return changes;
+}
+
+function parameterKey(value: ParameterValueInput): string {
+  return `${value.catalog_id}:${value.position ?? 0}`;
+}
+
+function normalizeParameter(value: ParameterValueInput): ParameterValueInput {
+  const normalized: ParameterValueInput = {
+    catalog_id: value.catalog_id,
+    position: value.position ?? 0,
+  };
+  if (value.option_id !== undefined) normalized.option_id = value.option_id;
+  if (value.number_value !== undefined) normalized.number_value = value.number_value;
+  if (value.text_value !== undefined) normalized.text_value = value.text_value;
+  if (value.boolean_value !== undefined) normalized.boolean_value = value.boolean_value;
+  if (value.json_value !== undefined) normalized.json_value = value.json_value;
+  return normalized;
+}
+
+function sameParameter(a: ParameterValueInput, b: ParameterValueInput): boolean {
+  return a.catalog_id === b.catalog_id
+    && (a.position ?? 0) === (b.position ?? 0)
+    && deepEqual(a.option_id, b.option_id)
+    && deepEqual(a.number_value, b.number_value)
+    && deepEqual(a.text_value, b.text_value)
+    && deepEqual(a.boolean_value, b.boolean_value)
+    && deepEqual(a.json_value, b.json_value);
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (a === undefined || b === undefined) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function hasPatchChanges(patch: PresetPatch): boolean {
+  return Object.keys(patch).length > 0;
 }
 
 async function uploadPresetAsset(input: {
