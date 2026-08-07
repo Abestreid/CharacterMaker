@@ -29,13 +29,13 @@ export function WardrobePage() {
     <div>
       <PageIntro
         action={(
-          <button className="focus-ring grid size-11 shrink-0 place-items-center rounded-2xl border border-zinc-800 bg-zinc-900/80 text-zinc-500 transition hover:text-zinc-100" onClick={resetWardrobe} title="Сбросить одежду" type="button">
+          <button className="focus-ring grid size-11 shrink-0 place-items-center rounded-2xl border border-zinc-800 bg-zinc-900/80 text-zinc-500 transition hover:text-zinc-100" onClick={resetWardrobe} title="Сбросить образ" type="button">
             <RotateCcw className="size-4" />
           </button>
         )}
-        description="Каждый слой одежды редактируется независимо: тип, цвет и материал. Вариант «Нет одежды» автоматически скрывает лишние параметры."
+        description="Один сохраненный Образ - это полный комплект. Каждый слой редактируется независимо: тип, цвет и материал."
         eyebrow="Шаг 2"
-        title="Одежда"
+        title="Образ"
       />
 
       <div className="space-y-4">
