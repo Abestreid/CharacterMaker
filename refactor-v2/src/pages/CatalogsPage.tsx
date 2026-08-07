@@ -1,8 +1,8 @@
 import { BookOpenText, Database, Search } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { PageIntro, cn, type OptionLike } from '../components/ui';
+import { characterMakerService } from '../core/character-maker.service';
 import { CATALOG } from '../domain';
-import { fetchPublicCatalogs } from '../infrastructure/supabase/catalog.repository';
 
 type CatalogEntry = {
   key: string;
@@ -36,7 +36,7 @@ function collectCatalogs(value: unknown, path: string[] = []): CatalogEntry[] {
 const localCatalogs = collectCatalogs(CATALOG).sort((a, b) => a.key.localeCompare(b.key));
 const sectionLabels: Record<string, string> = {
   character: 'Персона',
-  wardrobe: 'Одежда',
+  wardrobe: 'Образ',
   background: 'Фоны',
   scene: 'Сцена',
   shared: 'Общие',
@@ -51,7 +51,7 @@ export function CatalogsPage() {
 
   useEffect(() => {
     let active = true;
-    fetchPublicCatalogs()
+    characterMakerService.catalogs.list()
       .then((remoteCatalogs) => {
         if (!active || remoteCatalogs.length === 0) return;
         setCatalogs(remoteCatalogs.map((catalog): CatalogEntry => ({
