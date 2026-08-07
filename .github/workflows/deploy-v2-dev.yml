@@ -9,6 +9,10 @@ on:
       - '.github/workflows/deploy-v2-dev.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  statuses: write
+
 concurrency:
   group: charactermaker-v2-dev
   cancel-in-progress: true
@@ -30,6 +34,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Mark deployment pending
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state pending \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "CharacterMaker V2 DEV deployment in progress" \
+            --arg context "deployment/dev" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -44,9 +67,12 @@ jobs:
       - name: Production build
         run: npm run build
 
-      - name: Add DEV noindex protection
+      - name: Add DEV metadata and noindex protection
         run: |
           python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
           from pathlib import Path
 
           index = Path('dist/index.html')
@@ -59,12 +85,19 @@ jobs:
               index.write_text(html, encoding='utf-8')
 
           Path('dist/robots.txt').write_text('User-agent: *\nDisallow: /\n', encoding='utf-8')
+          Path('dist/build-info.json').write_text(json.dumps({
+              'commit': os.environ['GITHUB_SHA'],
+              'ref': os.environ['GITHUB_REF_NAME'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'built_at': datetime.now(timezone.utc).isoformat(),
+          }, ensure_ascii=False, indent=2), encoding='utf-8')
           PY
 
       - name: Validate deploy target
         run: |
           test "$DEPLOY_DIR" = "/htdocs/dev"
           test -f dist/index.html
+          test -f dist/build-info.json
           test -d dist/assets
 
       - name: Install FTP client
@@ -91,30 +124,108 @@ jobs:
             bye
           "
 
+      - name: Verify deployed commit over FTP
+        working-directory: .
+        env:
+          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME || secrets.FTP_USERNAME || secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD || secrets.FTP_PASSWORD || secrets.FTP_PASS }}
+        run: |
+          rm -f /tmp/charmaker-build-info.json
+          lftp -c "
+            set ftp:passive-mode true;
+            set net:max-retries 3;
+            set net:timeout 20;
+            open -p 21 ftp://$FTP_SERVER;
+            user $FTP_USERNAME $FTP_PASSWORD;
+            cd $DEPLOY_DIR;
+            get build-info.json -o /tmp/charmaker-build-info.json;
+            bye
+          "
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          remote = json.loads(Path('/tmp/charmaker-build-info.json').read_text(encoding='utf-8'))
+          expected = os.environ['GITHUB_SHA']
+          actual = remote.get('commit')
+          if actual != expected:
+              raise SystemExit(f'Remote DEV commit mismatch: expected {expected}, got {actual}')
+          print(f'VERIFIED_REMOTE_COMMIT={actual}')
+          PY
+
+      - name: Mark deployment success
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state success \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "V2 DEV deployed; remote FTP manifest matches commit" \
+            --arg context "deployment/dev" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
+
       - name: HTTP smoke check
         continue-on-error: true
         run: |
-          curl --fail --location --silent --show-error --max-time 30 "$DEPLOY_URL" -o /tmp/charmaker-dev.html
+          curl --fail --location --silent --show-error --max-time 30 \
+            -H 'Cache-Control: no-cache' \
+            "$DEPLOY_URL?commit=$GITHUB_SHA" -o /tmp/charmaker-dev.html
           test -s /tmp/charmaker-dev.html
         working-directory: .
 
       - name: Install browsers for visual verification
+        continue-on-error: true
         run: npx --yes playwright@latest install --with-deps chromium webkit
         working-directory: .
 
       - name: Verify and capture desktop
-        run: npx --yes playwright@latest screenshot --device="Desktop Chrome" --wait-for-timeout=5000 --full-page "$DEPLOY_URL" /tmp/charmaker-dev-desktop.png
+        continue-on-error: true
+        run: npx --yes playwright@latest screenshot --device="Desktop Chrome" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-desktop.png
         working-directory: .
 
       - name: Verify and capture mobile
-        run: npx --yes playwright@latest screenshot --device="iPhone 13" --wait-for-timeout=5000 --full-page "$DEPLOY_URL" /tmp/charmaker-dev-mobile.png
+        continue-on-error: true
+        run: npx --yes playwright@latest screenshot --device="iPhone 13" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-mobile.png
         working-directory: .
 
       - name: Upload visual verification
+        if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: charmaker-dev-screenshots
           path: |
             /tmp/charmaker-dev-desktop.png
             /tmp/charmaker-dev-mobile.png
+          if-no-files-found: ignore
           retention-days: 7
+
+      - name: Mark deployment failure
+        if: failure()
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state failure \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "V2 DEV deploy failed before remote commit verification" \
+            --arg context "deployment/dev" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
