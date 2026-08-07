@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: charactermaker-mcp-smoke
@@ -28,6 +29,24 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Mark MCP smoke pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state pending \
+            --arg target_url "$MCP_URL/health" \
+            --arg description "CharacterMaker MCP smoke test in progress" \
+            --arg context "mcp/smoke" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
 
       - name: Health check
         run: |
@@ -93,3 +112,41 @@ jobs:
           jq -e '.result.isError != true' /tmp/mcp-catalog.json >/dev/null
           jq -e '.result.structuredContent.catalog.id == "eye_color"' /tmp/mcp-catalog.json >/dev/null
           jq -e '.result.structuredContent.options | length > 0' /tmp/mcp-catalog.json >/dev/null
+
+      - name: Mark MCP smoke success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state success \
+            --arg target_url "$MCP_URL/health" \
+            --arg description "MCP health, initialize, tools/list and public reads passed" \
+            --arg context "mcp/smoke" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
+
+      - name: Mark MCP smoke failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state failure \
+            --arg target_url "$MCP_URL/health" \
+            --arg description "CharacterMaker MCP smoke test failed" \
+            --arg context "mcp/smoke" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
