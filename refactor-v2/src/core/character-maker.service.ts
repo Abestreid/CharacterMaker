@@ -5,6 +5,9 @@ import {
   fetchPublicCharacters,
   fetchPublicOutfits,
   fetchPublicScenes,
+  type PublicCharacterPreset,
+  type PublicOutfitPreset,
+  type PublicScenePreset,
 } from '../infrastructure/supabase/library.repository';
 import { fetchPresetAssets, type PresetAsset } from '../infrastructure/supabase/preset-assets.repository';
 import {
@@ -13,6 +16,7 @@ import {
   deletePreset,
   savePreset,
   setAssetReferenceStatus,
+  type AiContext,
   type PresetKind,
   type ReferenceStatus,
 } from '../infrastructure/supabase/preset.repository';
@@ -35,17 +39,17 @@ export const characterMakerService = {
   characters: {
     list: fetchPublicCharacters,
     load: loadCharacterState,
-    save: (identity: PresetIdentity, state: CharacterState) => savePreset('character', characterStateToPreset(identity, state)),
+    save: saveCharacter,
   },
   outfits: {
     list: fetchPublicOutfits,
     load: loadWardrobeState,
-    save: (identity: PresetIdentity, state: WardrobeState) => savePreset('outfit', wardrobeStateToOutfitPreset(identity, state)),
+    save: saveOutfit,
   },
   scenes: {
     list: fetchPublicScenes,
     load: loadSceneState,
-    save: (identity: PresetIdentity, state: SceneState) => savePreset('scene', sceneStateToPreset(identity, state)),
+    save: saveScene,
   },
   presets: {
     archive: (kind: PresetKind, id: string) => deletePreset(kind, id, false),
@@ -57,6 +61,31 @@ export const characterMakerService = {
     setReferenceStatus: setAssetReferenceStatus,
   },
 } as const;
+
+async function saveCharacter(identity: PresetIdentity, state: CharacterState): Promise<string> {
+  const resolved = await preserveAiContext(identity, fetchPublicCharacters);
+  return savePreset('character', characterStateToPreset(resolved, state));
+}
+
+async function saveOutfit(identity: PresetIdentity, state: WardrobeState): Promise<string> {
+  const resolved = await preserveAiContext(identity, fetchPublicOutfits);
+  return savePreset('outfit', wardrobeStateToOutfitPreset(resolved, state));
+}
+
+async function saveScene(identity: PresetIdentity, state: SceneState): Promise<string> {
+  const resolved = await preserveAiContext(identity, fetchPublicScenes);
+  return savePreset('scene', sceneStateToPreset(resolved, state));
+}
+
+async function preserveAiContext<T extends { id: string; aiContext: AiContext }>(
+  identity: PresetIdentity,
+  list: () => Promise<T[]>,
+): Promise<PresetIdentity> {
+  if (!identity.id || identity.aiContext !== undefined) return identity;
+  const existing = (await list()).find((item) => item.id === identity.id);
+  if (!existing) return identity;
+  return { ...identity, aiContext: existing.aiContext };
+}
 
 async function uploadPresetAsset(input: {
   kind: PresetKind;
@@ -104,3 +133,5 @@ function scopeForKind(kind: PresetKind): MediaScope {
   if (kind === 'outfit') return 'outfits';
   return 'scenes';
 }
+
+export type { PublicCharacterPreset, PublicOutfitPreset, PublicScenePreset };
