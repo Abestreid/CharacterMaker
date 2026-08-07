@@ -1,5 +1,5 @@
 import type { CharacterState, SceneState, WardrobeState } from '../../domain';
-import type { ParameterValueInput, PresetPayload } from './preset-admin.repository';
+import type { ParameterValueInput, PresetPayload } from './preset.repository';
 
 const option = (catalog_id: string, option_id: string, position = 0): ParameterValueInput => ({ catalog_id, option_id, position });
 const bool = (catalog_id: string, boolean_value: boolean, position = 0): ParameterValueInput => ({ catalog_id, boolean_value, position });
