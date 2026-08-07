@@ -66,6 +66,12 @@ function upload(): never {
     ];
     if (!isset($extensions[$mime])) fail('Разрешены только JPEG, PNG и WebP изображения.');
 
+    $imageInfo = @getimagesize($tmp);
+    if ($imageInfo === false) fail('Не удалось прочитать размеры изображения.');
+    $width = isset($imageInfo[0]) ? (int)$imageInfo[0] : null;
+    $height = isset($imageInfo[1]) ? (int)$imageInfo[1] : null;
+    if (!$width || !$height) fail('Некорректные размеры изображения.');
+
     $relativeDir = $scope . '/' . $entityId;
     $absoluteDir = mediaRoot() . DIRECTORY_SEPARATOR . $scope . DIRECTORY_SEPARATOR . $entityId;
     if (!is_dir($absoluteDir) && !mkdir($absoluteDir, 0755, true) && !is_dir($absoluteDir)) {
@@ -86,6 +92,8 @@ function upload(): never {
         'fileName' => $fileName,
         'mimeType' => $mime,
         'sizeBytes' => filesize($absolutePath) ?: $size,
+        'width' => $width,
+        'height' => $height,
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
