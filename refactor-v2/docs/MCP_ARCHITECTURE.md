@@ -1,326 +1,335 @@
 # CharacterMaker MCP - architecture and current implementation
 
-Updated: 2026-08-07
+Updated: 2026-08-08
 
 ## Purpose
 
-CharacterMaker MCP is a bidirectional bridge between MCP clients such as ChatGPT/Codex and the same CharacterMaker data used by the Web UI.
+CharacterMaker MCP is the bridge between MCP hosts such as ChatGPT/Codex and the same CharacterMaker data used by Web.
 
-The MCP is not a second CharacterMaker implementation. It uses the same persisted entities, stable catalog IDs, normalized parameter tables, AI context fields and asset relations.
+CharacterMaker is the canonical identity/context/reference source. It is **not required to be the image-generation provider**.
 
-Primary workflow:
+Current intended image flow:
 
 ```text
-MCP client
-   |
-   v
-CharacterMaker MCP
-   |
-   +--> Persona
-   +--> Outfit
-   +--> Scene
-   +--> Catalogs
-   +--> Assets
-   +--> Generation Context
-   |
-   v
-Supabase PostgreSQL
-   |
-   +--> image metadata/relations
-             |
-             v
-       InfinityFree /media
+User: "сделай фото Лайвет"
+        |
+        v
+ChatGPT / MCP host
+        |
+        v
+prepare_image_generation("Лайвет")
+        |
+        +--> Persona normalized parameters
+        +--> AI context
+        +--> ranked face/body references
+        +--> actual MCP image content
+        +--> optional Outfit / Scene
+        |
+        v
+host_action = native_image_generation
+        |
+        v
+ChatGPT native image generator
 ```
 
-## Hosting and cost model
+A missing CharacterMaker `generate_image` provider tool is therefore not a valid reason for the host to stop when the host itself can generate images.
+
+## Hosting and infrastructure
 
 MCP is deployed inside the existing Supabase Free project as an Edge Function.
 
-No additional hosting provider is used.
+- project: `charmaker`;
+- ref: `kszybiwhchwekpmramxn`;
+- function: `charactermaker-mcp`;
+- endpoint: `https://kszybiwhchwekpmramxn.supabase.co/functions/v1/charactermaker-mcp`;
+- current MCP server version: `0.2.0`;
+- `verify_jwt=false` is intentional for the current public/no-account phase.
 
-Not used:
+Physical images remain on InfinityFree `/media/...`. Supabase stores PostgreSQL data, metadata and relations. Supabase Storage, Cloudflare and R2 are not used.
 
-- Cloudflare Workers;
-- Cloudflare R2;
-- Supabase Storage;
-- paid standalone backend.
+## Unified Core
 
-Supabase project:
+Web and MCP share:
 
-`charmaker`
-
-Project ref:
-
-`kszybiwhchwekpmramxn`
-
-Edge Function:
-
-`charactermaker-mcp`
-
-Remote MCP endpoint:
-
-`https://kszybiwhchwekpmramxn.supabase.co/functions/v1/charactermaker-mcp`
-
-Health endpoint:
-
-`https://kszybiwhchwekpmramxn.supabase.co/functions/v1/charactermaker-mcp/health`
-
-Current deployed function version at initial deployment: `1`.
-
-## Authentication mode
-
-Current CharacterMaker phase has no end-user accounts, roles or private presets.
-
-Therefore the MCP function is intentionally deployed with:
-
-`verify_jwt = false`
-
-This matches the current public shared-library model. Authentication/ownership must not be added silently while CharacterMaker remains a personal public tool.
-
-When real multi-user accounts are introduced later, MCP auth and database ownership/RLS must be designed together as a separate architecture change.
-
-## Protocol implementation
-
-Runtime:
-
-- Supabase Edge Functions / Deno;
-- `@modelcontextprotocol/server` 2.x;
-- Zod 4;
-- `@supabase/supabase-js`.
-
-The server uses the current stateless MCP handler and keeps legacy stateless compatibility enabled for older MCP clients.
-
-Source in Git:
-
-`supabase/functions/charactermaker-mcp/index.ts`
-
-## Current MCP tools
-
-### Read tools
-
-`search_presets`
-
-Searches active public:
-
-- Persona;
-- Outfit;
-- Scene;
-- reusable Background.
-
-`get_preset`
-
-Returns a complete saved entity bundle:
-
-- entity columns;
-- schema/version;
-- `ai_context`;
-- normalized parameter values;
-- catalog labels for parameter IDs;
-- linked images;
-- relational Background for Scene.
-
-`get_catalog`
-
-Returns one current database catalog, categories and active option values. MCP should call this before writing an option when the stable `option_id` is uncertain.
-
-`get_schema`
-
-Returns current persistence/MCP contract and schema versions.
-
-`build_generation_context`
-
-Builds a provider-independent bundle from:
-
-- required Persona;
-- optional Outfit;
-- optional Scene;
-- AI contexts;
-- canonical images;
-- approved/reference-only images.
-
-It does not call an image-generation provider.
-
-`list_assets`
-
-Returns linked asset metadata, role, primary flag and reference status.
-
-`get_asset`
-
-Returns asset metadata and can return the actual image as MCP image content.
-
-### Write tools
-
-`create_character`
-
-Creates a public Persona. Unknown facts must be omitted rather than replaced with guessed UI defaults.
-
-`create_outfit`
-
-Creates one complete public Outfit/Образ.
-
-`create_scene`
-
-Creates a public Scene and resolves `background_slug` to the relational `backgrounds.id`.
-
-`patch_preset`
-
-Performs a true partial update. Omitted fields stay unchanged.
-
-Supports:
-
-- top-level field patches;
-- parameter-level upsert;
-- parameter-level delete;
-- `expected_version` optimistic concurrency;
-- idempotency;
-- MCP mutation audit source.
-
-`import_asset_from_url`
-
-Imports a publicly fetchable JPEG/PNG/WebP into InfinityFree and attaches it to a saved entity.
-
-Current DEV media target:
-
-`https://charmaker.free.nf/dev/api/media.php?action=upload`
-
-The physical file is stored under the normal root `/media/...` structure.
-
-`set_asset_reference_status`
-
-Sets:
-
-- `normal`;
-- `approved`;
-- `canonical`;
-- `reference_only`;
-- `rejected`.
-
-`archive_preset`
-
-Soft-deletes an entity from the active public library. MCP does not expose hard delete.
-
-## Partial updates
-
-Database RPC:
-
-`public_patch_preset`
-
-This is separate from the full Web editor save RPC because MCP conversations frequently change one fact only.
-
-Example conceptual operation:
-
-```text
-"У Блонди теперь зеленые глаза"
-```
-
-MCP patch:
-
-```json
-{
-  "kind": "character",
-  "id": "...",
-  "expected_version": 4,
-  "parameters": [
-    {
-      "catalog_id": "eye_color",
-      "option_id": "green",
-      "position": 0
-    }
-  ]
-}
-```
-
-All other Persona fields remain unchanged.
-
-The RPC was transactionally tested against a real existing Persona and rolled back after the test, confirming both the update behavior and rollback integrity.
-
-## AI context
-
-Primary presets contain `ai_context` JSONB.
-
-Expected semantic fields include:
-
-- `summary`;
-- `canonicalDescription`;
-- `identityInstructions`;
-- `mustPreserve[]`;
-- `mayVary[]`;
-- `avoid[]`;
-- `generationNotes[]`;
-- `schemaVersion`.
-
-The normal Web editor preserves existing `ai_context` when it updates visual fields, so Web and MCP do not erase each other's data.
-
-## Images and canonical references
-
-Physical image storage stays on InfinityFree.
-
-Supabase stores:
-
-- asset metadata;
-- entity relation;
-- role;
-- primary flag;
-- `reference_status`.
-
-A typical Persona can therefore have:
-
-```text
-portrait          primary + canonical
-face_closeup      canonical
-full_front        approved
-reference         reference_only
-```
-
-MCP `get_asset` can return the image itself to a compatible client.
-
-MCP `import_asset_from_url` handles the reverse direction when the client can provide a publicly fetchable image URL.
-
-The exact ability of a particular MCP host to pass its own newly generated image directly into an external MCP tool depends on that host. CharacterMaker does not assume that capability; URL import and MCP image output are explicit supported paths.
-
-## Database safety for the current public phase
-
-Public writes are intentional at this stage.
-
-The system still protects data consistency with:
-
+- Persona/Outfit/Scene entities;
 - normalized catalog IDs;
 - schema versions;
-- optimistic entity `version`;
-- `expected_version` conflict detection;
-- idempotency keys;
-- audit log;
-- soft archive instead of MCP hard delete.
+- `ai_context`;
+- asset relations/statuses;
+- visual-reference ranking concepts;
+- optimistic/versioned mutation semantics.
 
-Security Advisor warnings about public executable `SECURITY DEFINER` mutation RPCs are expected under this explicitly chosen public/no-account mode and must not be "fixed" by introducing accounts or service-role-only writes without a new product decision.
+Core Web generation contract is now:
+
+`generation-context-v2`
+
+Source:
+
+`src/core/context.service.ts`
+
+MCP returns the same conceptual v2 package in snake_case and adds MCP-host-specific `host_action` instructions.
+
+## Why MCP v0.2 was needed
+
+Real ChatGPT conversations exposed four service-level failures:
+
+1. a search could be performed but the host did not reliably continue to the full Persona card;
+2. showing a saved photo required a manual `list_assets -> get_asset` chain and could result only in text/URL output;
+3. large preset data was duplicated in both MCP text and structured output, unnecessarily increasing response size;
+4. after `build_generation_context`, the host could incorrectly stop and claim CharacterMaker needed its own `generate_image` tool even though ChatGPT already had native image generation.
+
+The v0.2 tools make the intended action explicit and reduce the number of dependent tool calls.
+
+## Tool model
+
+### `search_presets`
+
+Discovery/listing tool.
+
+Changes in v0.2:
+
+- exact name/slug matches are ranked first;
+- returns `exact_match` for one exact result;
+- Persona/Outfit/Scene results include visual summary:
+  - asset count;
+  - canonical count;
+  - approved count;
+  - preview asset ID/role.
+
+For explicit image-generation intent with a known exact Persona name, `prepare_image_generation` should normally be called directly.
+
+### `get_preset`
+
+Returns complete structured details:
+
+- entity columns;
+- normalized parameters with labels;
+- AI context;
+- optional asset metadata;
+- visual package metadata;
+- relational Background for Scene.
+
+Identifier accepts UUID, slug or exact unique name.
+
+Important response behavior:
+
+- `include_assets=true` returns metadata only, not binary image content;
+- full structured card stays in `structuredContent`;
+- text output is a compact summary instead of duplicating the entire card.
+
+This specifically reduces output size and makes `include_assets=true` more robust.
+
+### `get_visual_package`
+
+High-level tool for requests such as:
+
+- `покажи фото Victoria June`;
+- `получи фотографии Лайвет`;
+- `открой референс Образа`.
+
+It:
+
+1. resolves UUID/slug/exact unique name;
+2. loads linked assets;
+3. ranks the best visual references;
+4. returns selected assets and actual MCP image content in one call.
+
+This replaces normal manual `list_assets -> get_asset` chains.
+
+### `prepare_image_generation`
+
+Primary high-level tool for explicit image creation requests.
+
+Input:
+
+- required Persona UUID/slug/exact name;
+- optional Outfit UUID/slug/exact name;
+- optional Scene UUID/slug/exact name;
+- `include_images`;
+- number of reference images.
+
+Output contains:
+
+- `generation-context-v2`;
+- full normalized Persona/Outfit/Scene context;
+- `generation_brief`;
+- ranked visual package;
+- primary face/body IDs;
+- selected real MCP images;
+- `ready_for_native_generation=true`;
+- explicit `host_action`.
+
+`host_action` tells a compatible host that if the user requested an image, it should immediately invoke its own native image generator with the returned data and image references.
+
+### `build_generation_context`
+
+Remains available for provider-neutral integrations by UUID.
+
+v0.2 output now includes:
+
+- ranked visual package;
+- primary face/body reference IDs;
+- recommended assets;
+- generation brief;
+- native-host continuation instruction.
+
+For interactive ChatGPT image generation, `prepare_image_generation` is preferable because it can inline actual reference image bytes in the same tool result.
+
+### Existing read/write tools
+
+Still available:
+
+- `get_catalog`;
+- `get_schema`;
+- `list_assets`;
+- `get_asset`;
+- `create_character`;
+- `create_outfit`;
+- `create_scene`;
+- `patch_preset`;
+- `import_asset_from_url`;
+- `set_asset_reference_status`;
+- `archive_preset`.
+
+Hard delete remains intentionally absent from MCP.
+
+## Visual-reference ranking
+
+Asset quality priority:
+
+1. `canonical`;
+2. `approved`;
+3. `reference_only`;
+4. `normal`;
+5. `rejected` is excluded.
+
+Additional ranking signals:
+
+- `is_primary`;
+- semantic asset role;
+- relation sort order.
+
+Persona role priority recognizes identity references such as:
+
+- `face_closeup`;
+- `portrait`;
+- `headshot`;
+- `full_front`;
+- `full_body_front`;
+- `body_reference`;
+- profiles;
+- hair/reference roles.
+
+Returned visual package includes:
+
+- `reference_quality`;
+- `primary_face_asset`;
+- `primary_body_asset`;
+- `recommended_assets`;
+- `recommended_asset_ids`;
+- warnings when canonical/approved/face/body references are missing.
+
+This is a ranking policy only. It does not modify asset statuses or Persona data.
+
+## Multimodal output safety
+
+Actual MCP images are used by:
+
+- `get_asset(include_image=true)`;
+- `get_visual_package(include_images=true)`;
+- `prepare_image_generation(include_images=true)`.
+
+Limits:
+
+- one source image <= 8 MB;
+- combined inline images per high-level call <= 12 MB;
+- individual image-fetch failures are captured in `inline_image_errors`;
+- the structured Persona context remains available even if one image fails to fetch.
+
+## Host behavior contract
+
+For explicit requests such as:
+
+`@CharMaker сделай фото Лайвет`
+
+correct behavior is:
+
+```text
+prepare_image_generation
+-> receive Persona parameters + visual references
+-> invoke host native image generation
+-> return generated image
+```
+
+Incorrect behavior:
+
+```text
+build_generation_context
+-> "у CharMaker нет generate_image, поэтому я не могу продолжить"
+```
+
+For explicit photo-display requests such as:
+
+`покажи фото Victoria June`
+
+correct behavior is:
+
+```text
+get_visual_package(include_images=true)
+-> display actual MCP image content
+```
+
+Do not claim the image was shown when only metadata/URL was returned.
+
+Do not claim full Persona parameters were loaded if only a search result or a single asset was retrieved.
+
+## Persistence and mutation safety
+
+No mutation semantics were changed by the v0.2 visual package.
+
+Current mutation rules remain:
+
+- public shared library, no accounts/roles;
+- stable catalog IDs;
+- partial `patch_preset`;
+- `expected_version` conflict detection;
+- idempotency;
+- audit log;
+- soft archive;
+- unknown Persona facts omitted rather than guessed/defaulted.
 
 ## Automated verification
 
-GitHub workflow:
+Permanent workflow:
 
 `.github/workflows/mcp-smoke.yml`
 
-It performs remote checks from an external GitHub runner:
+v0.2 smoke explicitly validates the previously problematic scenarios:
 
-1. health endpoint;
-2. MCP `initialize`;
-3. initialized notification;
-4. `tools/list`;
-5. real Persona search against Supabase;
-6. current catalog read;
-7. actual image-content read when the smoke reference asset is available.
+1. health reports server `0.2.0`;
+2. MCP handshake;
+3. tools include `get_visual_package` and `prepare_image_generation`;
+4. exact `Victoria June` search returns visual summary;
+5. `get_preset("Victoria June", include_assets=true)` returns normalized card + assets without error;
+6. `get_visual_package` returns an actual canonical image;
+7. `prepare_image_generation("Victoria June")` returns v2 context, actual image content and `native_image_generation` host action;
+8. `prepare_image_generation("Лайвет")` also works with her current fallback-quality reference;
+9. catalog read remains functional.
 
-The workflow publishes commit status:
+Permanent smoke is read-only and does not create test user data.
 
-`mcp/smoke`
+## Scope of the 2026-08-08 correction
 
-This verification is separate from frontend `deployment/dev` status.
+This correction changes **service/Core/MCP behavior only**.
+
+It does not alter Persona/Outfit/Scene user data, measurements, catalog values or canonical asset statuses. Data cleanup/enrichment is a separate task.
 
 ## Documentation rule
 
-Every MCP tool/schema/protocol/deployment change must update:
+Every MCP/Core contract change must update:
 
 - this document;
+- `supabase/functions/charactermaker-mcp/README.md`;
 - `docs/CHANGELOG.md`;
-- affected database migration documentation;
-- source in `supabase/functions/charactermaker-mcp/`.
+- affected tests/workflows;
+- DB migrations only when the database schema/contract itself changes.
