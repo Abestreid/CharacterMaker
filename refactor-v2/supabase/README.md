@@ -72,6 +72,8 @@ The Web UI must not create an independent persistence model from MCP.
 
 ## CharacterMaker MCP Edge Function
 
+Current deployed MCP server version: `0.2.0` (Edge Function version 2).
+
 Function slug:
 
 `charactermaker-mcp`
@@ -92,9 +94,11 @@ This is intentional for the current public/no-account product phase.
 
 The MCP exposes read/write operations for:
 
-- search and complete Persona/Outfit/Scene retrieval;
+- ranked search and complete Persona/Outfit/Scene retrieval;
+- high-level visual package with actual MCP image content;
+- complete native-host image-generation preparation;
 - catalogs and current schema;
-- generation context assembly;
+- `generation-context-v2` assembly;
 - create and partial patch;
 - asset listing/read/image content;
 - public-image URL import to InfinityFree;
@@ -109,9 +113,29 @@ External protocol verification:
 
 `.github/workflows/mcp-smoke.yml`
 
-The smoke workflow has successfully verified health, initialize/initialized handshake, tools/list, real database reads, catalog reads and actual image content from an external GitHub runner.
+The smoke workflow now also permanently verifies the previously failing visual workflow: exact `Victoria June` search, `get_preset(include_assets=true)`, canonical image output through `get_visual_package`, `prepare_image_generation` with real reference image content and native-generation host action, plus the Лайвет fallback-reference path.
 
 A separate one-time validation successfully verified create -> read -> partial patch -> read -> archive through the published MCP endpoint. The temporary fixture and its test audit/idempotency data were removed after the successful test.
+
+### Visual and native-image-generation workflow
+
+CharacterMaker is the canonical Persona/Outfit/Scene/reference source; it is not required to be the image-generation provider.
+
+High-level MCP workflows:
+
+- structured card -> `get_preset`;
+- show/get saved photos -> `get_visual_package(include_images=true)`;
+- create/generate an image -> `prepare_image_generation(include_images=true)` and then the MCP host's native image generator when available;
+- one known asset -> `get_asset(include_image=true)`;
+- partial edit -> `patch_preset`.
+
+`prepare_image_generation` returns `generation-context-v2`, ranked visual references, actual MCP image content and `host_action=native_image_generation`. A compatible host such as ChatGPT must not stop merely because CharacterMaker itself has no provider-specific `generate_image` MCP tool.
+
+Visual ranking prefers `canonical`, then `approved`, `reference_only`, `normal`; rejected assets are excluded. Primary flag, semantic role and relation order are additional signals.
+
+The Web Core uses the same `generation-context-v2` / visual-package concepts. MCP only adds protocol-specific multimodal content and host-action instructions.
+
+The 2026-08-08 MCP v0.2 correction changed service/Core/MCP behavior only and did not modify saved Persona/Outfit/Scene data or asset statuses.
 
 ## Catalog system
 

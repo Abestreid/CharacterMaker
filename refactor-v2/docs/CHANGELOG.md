@@ -2,6 +2,26 @@
 
 Журнал фиксирует изменения ветки `refactor/domain-catalog-v2`. Новые записи добавляются сверху внутри соответствующей даты.
 
+## 2026-08-08
+
+### MCP v0.2.0 visual and native-generation workflow
+
+- CharacterMaker MCP обновлен с `0.1.0` до `0.2.0` и развернут как Edge Function version 2 на прежнем endpoint;
+- добавлен `get_visual_package`: UUID/slug/exact name -> ranking сохраненных assets -> actual MCP image content в одном вызове;
+- добавлен `prepare_image_generation`: Persona + optional Outfit/Scene -> `generation-context-v2` + primary face/body + recommended references + actual image content + `host_action=native_image_generation`;
+- зафиксировано обязательное поведение MCP host: если пользователь просит создать изображение и host имеет native image generator, после `prepare_image_generation` он должен продолжить генерацию, а не останавливаться из-за отсутствия `generate_image` внутри CharacterMaker;
+- `search_presets` теперь ранжирует exact name/slug первым и возвращает `exact_match`, asset/canonical/approved counts и preview asset;
+- `get_preset` принимает UUID/slug/exact unique name, стабильно возвращает `include_assets=true`, не тащит binary images и не дублирует полную карточку в text + structured output;
+- `metadata.editor_state` исключен из MCP card output: source of truth для MCP - normal columns + normalized parameter rows;
+- добавлен ranking visual references: `canonical > approved > reference_only > normal`, rejected исключается, учитываются `is_primary`, semantic role и sort order;
+- multimodal workflow изолирует ошибки отдельных картинок и ограничивает combined inline payload 12 MB;
+- общий Web Core синхронизирован на `generation-context-v2`, добавлены `VisualPackage`, primary face/body и recommended asset IDs;
+- добавлены Core regression tests для canonical/primary/role ranking, rejected exclusion и missing body warning;
+- постоянный MCP smoke теперь воспроизводит реальные проблемные сценарии: exact `Victoria June`, `get_preset(include_assets=true)`, canonical photo через `get_visual_package`, полный `prepare_image_generation`, а также Лайвет;
+- расширенный remote MCP smoke завершился успешно;
+- данные Персон/Образов/Сцен, измерения, catalog values и reference statuses в этом пакете не изменялись;
+- подробности: `docs/changes/2026-08-08-mcp-visual-generation-workflow.md` и `docs/MCP_ARCHITECTURE.md`.
+
 ## 2026-08-07
 
 ### Original CharacterMaker character presets imported into Supabase
