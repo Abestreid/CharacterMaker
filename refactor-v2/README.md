@@ -189,20 +189,30 @@ Primary presets имеют `ai_context` JSONB. Он предназначен д�
 
 Обычное Web-редактирование сохраняет существующий `ai_context`, чтобы MCP-инструкции не терялись.
 
-`context.service.ts` и MCP `build_generation_context` собирают:
+`context.service.ts` и MCP собирают общий `generation-context-v2`:
 
 ```text
-GenerationContext
+GenerationContext v2
 ├── Persona structured data + labels + aiContext + assets
 ├── Outfit structured data + labels + aiContext + assets
 ├── Scene structured data + labels + aiContext + assets
+├── VisualPackage
+│   ├── primary face/body references
+│   └── ranked recommended assets
 ├── canonicalAssets
 └── referenceAssets
 ```
 
+Для интерактивного ChatGPT workflow MCP v0.2 добавляет high-level tools:
+
+- `get_visual_package` - получить лучшие сохраненные фото и actual MCP image content;
+- `prepare_image_generation` - собрать Persona/optional Outfit/Scene + `generation-context-v2` + reference images + `host_action=native_image_generation`.
+
+CharacterMaker остается источником canonical identity/context/references. Если пользователь просит создать изображение и MCP host имеет собственный native image generator, host должен продолжить генерацию после `prepare_image_generation`, а не требовать отдельный provider-specific `generate_image` tool внутри CharacterMaker.
+
 Текущая версия контракта:
 
-`generation-context-v1`
+`generation-context-v2`
 
 ## Full save, partial patch, retry и audit
 
