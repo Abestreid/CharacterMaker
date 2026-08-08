@@ -24,7 +24,7 @@ env:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
 
     steps:
       - name: Checkout repository
@@ -37,7 +37,7 @@ jobs:
           payload=$(jq -n \
             --arg state pending \
             --arg target_url "$MCP_URL/health" \
-            --arg description "CharacterMaker MCP smoke test in progress" \
+            --arg description "CharacterMaker MCP visual/generation smoke in progress" \
             --arg context "mcp/smoke" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
@@ -51,10 +51,10 @@ jobs:
       - name: Health check
         run: |
           curl --fail-with-body --silent --show-error --max-time 30 \
-            "$MCP_URL/health" \
-            -o /tmp/mcp-health.json
+            "$MCP_URL/health" -o /tmp/mcp-health.json
           cat /tmp/mcp-health.json
-          jq -e '.ok == true and .name == "charactermaker"' /tmp/mcp-health.json >/dev/null
+          jq -e '.ok == true and .name == "charactermaker" and .version == "0.2.0"' /tmp/mcp-health.json >/dev/null
+          jq -e '.image_workflow | contains("prepare_image_generation")' /tmp/mcp-health.json >/dev/null
 
       - name: MCP initialize
         run: |
@@ -65,135 +65,109 @@ jobs:
             --data-binary @- \
             -D /tmp/mcp-initialize.headers \
             -o /tmp/mcp-initialize.raw <<'JSON'
-          {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"github-actions-smoke","version":"1.0.0"}}}
+          {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"github-actions-smoke","version":"2.0.0"}}}
           JSON
           python .github/scripts/parse-mcp-response.py /tmp/mcp-initialize.raw /tmp/mcp-initialize.json
-          cat /tmp/mcp-initialize.json
-          jq -e '.result.serverInfo.name == "charactermaker"' /tmp/mcp-initialize.json >/dev/null
+          jq -e '.result.serverInfo.name == "charactermaker" and .result.serverInfo.version == "0.2.0"' /tmp/mcp-initialize.json >/dev/null
           protocol=$(jq -r '.result.protocolVersion' /tmp/mcp-initialize.json)
           session=$(awk 'BEGIN{IGNORECASE=1} /^mcp-session-id:/ {gsub("\r", "", $2); print $2}' /tmp/mcp-initialize.headers | tail -n1)
           echo "MCP_PROTOCOL_VERSION=$protocol" >> "$GITHUB_ENV"
           echo "MCP_SESSION_ID=$session" >> "$GITHUB_ENV"
-          echo "Negotiated protocol: $protocol"
-          if [ -n "$session" ]; then echo "Server returned an MCP session id."; else echo "Server is operating without an MCP session id."; fi
 
       - name: MCP initialized notification
         run: |
-          args=(
-            --fail-with-body --silent --show-error --max-time 30
-            -X POST "$MCP_URL"
-            -H 'Content-Type: application/json'
-            -H 'Accept: application/json, text/event-stream'
-            -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION"
-            --data-binary '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
-          )
+          args=(--fail-with-body --silent --show-error --max-time 30 -X POST "$MCP_URL" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION" --data-binary '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}')
           if [ -n "$MCP_SESSION_ID" ]; then args+=(-H "Mcp-Session-Id: $MCP_SESSION_ID"); fi
           curl "${args[@]}" -o /tmp/mcp-initialized.raw
 
       - name: MCP tools list
         run: |
-          args=(
-            --fail-with-body --silent --show-error --max-time 30
-            -X POST "$MCP_URL"
-            -H 'Content-Type: application/json'
-            -H 'Accept: application/json, text/event-stream'
-            -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION"
-            --data-binary '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-          )
+          args=(--fail-with-body --silent --show-error --max-time 30 -X POST "$MCP_URL" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION" --data-binary '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
           if [ -n "$MCP_SESSION_ID" ]; then args+=(-H "Mcp-Session-Id: $MCP_SESSION_ID"); fi
           curl "${args[@]}" -o /tmp/mcp-tools.raw
           python .github/scripts/parse-mcp-response.py /tmp/mcp-tools.raw /tmp/mcp-tools.json
-          jq -e '[.result.tools[].name] | index("search_presets") != null and index("get_preset") != null and index("patch_preset") != null and index("get_asset") != null' /tmp/mcp-tools.json >/dev/null
-          echo "MCP tools: $(jq -r '[.result.tools[].name] | join(", ")' /tmp/mcp-tools.json)"
+          jq -e '[.result.tools[].name] as $t | ($t|index("search_presets")!=null) and ($t|index("get_preset")!=null) and ($t|index("get_visual_package")!=null) and ($t|index("prepare_image_generation")!=null) and ($t|index("build_generation_context")!=null) and ($t|index("patch_preset")!=null) and ($t|index("get_asset")!=null)' /tmp/mcp-tools.json >/dev/null
+          echo "MCP tool count: $(jq '.result.tools | length' /tmp/mcp-tools.json)"
 
-      - name: MCP read existing Persona
+      - name: Exact Persona search includes visual summary
         run: |
-          args=(
-            --fail-with-body --silent --show-error --max-time 30
-            -X POST "$MCP_URL"
-            -H 'Content-Type: application/json'
-            -H 'Accept: application/json, text/event-stream'
-            -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION"
-            --data-binary '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_presets","arguments":{"kind":"character","query":"Лайвет","limit":5}}}'
-          )
+          args=(--fail-with-body --silent --show-error --max-time 30 -X POST "$MCP_URL" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION" --data-binary '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_presets","arguments":{"kind":"character","query":"Victoria June","limit":5}}}')
           if [ -n "$MCP_SESSION_ID" ]; then args+=(-H "Mcp-Session-Id: $MCP_SESSION_ID"); fi
           curl "${args[@]}" -o /tmp/mcp-search.raw
           python .github/scripts/parse-mcp-response.py /tmp/mcp-search.raw /tmp/mcp-search.json
           jq -e '.result.isError != true' /tmp/mcp-search.json >/dev/null
-          jq -e '.result.structuredContent.count >= 1' /tmp/mcp-search.json >/dev/null
-          jq -e '.result.structuredContent.items | map(.name) | index("Лайвет") != null' /tmp/mcp-search.json >/dev/null
+          jq -e '.result.structuredContent.exact_match.name == "Victoria June"' /tmp/mcp-search.json >/dev/null
+          jq -e '.result.structuredContent.exact_match.asset_count >= 1' /tmp/mcp-search.json >/dev/null
+          jq -e '.result.structuredContent.exact_match.preview_asset_id != null' /tmp/mcp-search.json >/dev/null
+
+      - name: Full preset with assets is stable
+        run: |
+          args=(--fail-with-body --silent --show-error --max-time 30 -X POST "$MCP_URL" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION" --data-binary '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_preset","arguments":{"kind":"character","id_or_slug":"Victoria June","include_assets":true}}}')
+          if [ -n "$MCP_SESSION_ID" ]; then args+=(-H "Mcp-Session-Id: $MCP_SESSION_ID"); fi
+          curl "${args[@]}" -o /tmp/mcp-preset.raw
+          python .github/scripts/parse-mcp-response.py /tmp/mcp-preset.raw /tmp/mcp-preset.json
+          jq -e '.result.isError != true' /tmp/mcp-preset.json >/dev/null
+          jq -e '.result.structuredContent.entity.slug == "victoria-june"' /tmp/mcp-preset.json >/dev/null
+          jq -e '.result.structuredContent.parameter_count > 0' /tmp/mcp-preset.json >/dev/null
+          jq -e '.result.structuredContent.assets | length >= 1' /tmp/mcp-preset.json >/dev/null
+          jq -e '.result.structuredContent.visual_package.primary_face_asset.id != null' /tmp/mcp-preset.json >/dev/null
+
+      - name: Visual package returns actual canonical photo content
+        run: |
+          args=(--fail-with-body --silent --show-error --max-time 45 -X POST "$MCP_URL" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION" --data-binary '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_visual_package","arguments":{"kind":"character","id_or_slug":"Victoria June","include_images":true,"max_images":2}}}')
+          if [ -n "$MCP_SESSION_ID" ]; then args+=(-H "Mcp-Session-Id: $MCP_SESSION_ID"); fi
+          curl "${args[@]}" -o /tmp/mcp-visual.raw
+          python .github/scripts/parse-mcp-response.py /tmp/mcp-visual.raw /tmp/mcp-visual.json
+          jq -e '.result.isError != true' /tmp/mcp-visual.json >/dev/null
+          jq -e '.result.structuredContent.inline_image_count >= 1' /tmp/mcp-visual.json >/dev/null
+          jq -e '.result.content | map(.type) | index("image") != null' /tmp/mcp-visual.json >/dev/null
+          jq -e '.result.structuredContent.visual_package.reference_quality == "canonical"' /tmp/mcp-visual.json >/dev/null
+
+      - name: Image-generation preparation returns context and reference image
+        run: |
+          args=(--fail-with-body --silent --show-error --max-time 45 -X POST "$MCP_URL" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION" --data-binary '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"prepare_image_generation","arguments":{"character":"Victoria June","include_images":true,"max_reference_images":3}}}')
+          if [ -n "$MCP_SESSION_ID" ]; then args+=(-H "Mcp-Session-Id: $MCP_SESSION_ID"); fi
+          curl "${args[@]}" -o /tmp/mcp-generation.raw
+          python .github/scripts/parse-mcp-response.py /tmp/mcp-generation.raw /tmp/mcp-generation.json
+          jq -e '.result.isError != true' /tmp/mcp-generation.json >/dev/null
+          jq -e '.result.structuredContent.schema_version == "generation-context-v2"' /tmp/mcp-generation.json >/dev/null
+          jq -e '.result.structuredContent.ready_for_native_generation == true' /tmp/mcp-generation.json >/dev/null
+          jq -e '.result.structuredContent.host_action.type == "native_image_generation" and .result.structuredContent.host_action.should_continue == true' /tmp/mcp-generation.json >/dev/null
+          jq -e '.result.structuredContent.visual_package.primary_face_asset_id != null' /tmp/mcp-generation.json >/dev/null
+          jq -e '.result.structuredContent.inline_image_count >= 1' /tmp/mcp-generation.json >/dev/null
+          jq -e '.result.content | map(.type) | index("image") != null' /tmp/mcp-generation.json >/dev/null
+
+      - name: Fallback Persona generation preparation also returns an image
+        run: |
+          args=(--fail-with-body --silent --show-error --max-time 45 -X POST "$MCP_URL" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION" --data-binary '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"prepare_image_generation","arguments":{"character":"Лайвет","include_images":true,"max_reference_images":2}}}')
+          if [ -n "$MCP_SESSION_ID" ]; then args+=(-H "Mcp-Session-Id: $MCP_SESSION_ID"); fi
+          curl "${args[@]}" -o /tmp/mcp-laivet.raw
+          python .github/scripts/parse-mcp-response.py /tmp/mcp-laivet.raw /tmp/mcp-laivet.json
+          jq -e '.result.isError != true' /tmp/mcp-laivet.json >/dev/null
+          jq -e '.result.structuredContent.ready_for_native_generation == true' /tmp/mcp-laivet.json >/dev/null
+          jq -e '.result.structuredContent.inline_image_count >= 1' /tmp/mcp-laivet.json >/dev/null
 
       - name: MCP catalog read
         run: |
-          args=(
-            --fail-with-body --silent --show-error --max-time 30
-            -X POST "$MCP_URL"
-            -H 'Content-Type: application/json'
-            -H 'Accept: application/json, text/event-stream'
-            -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION"
-            --data-binary '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_catalog","arguments":{"catalog_id":"eye_color"}}}'
-          )
+          args=(--fail-with-body --silent --show-error --max-time 30 -X POST "$MCP_URL" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION" --data-binary '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get_catalog","arguments":{"catalog_id":"eye_color"}}}')
           if [ -n "$MCP_SESSION_ID" ]; then args+=(-H "Mcp-Session-Id: $MCP_SESSION_ID"); fi
           curl "${args[@]}" -o /tmp/mcp-catalog.raw
           python .github/scripts/parse-mcp-response.py /tmp/mcp-catalog.raw /tmp/mcp-catalog.json
           jq -e '.result.isError != true' /tmp/mcp-catalog.json >/dev/null
-          jq -e '.result.structuredContent.catalog.id == "eye_color"' /tmp/mcp-catalog.json >/dev/null
-          jq -e '.result.structuredContent.options | length > 0' /tmp/mcp-catalog.json >/dev/null
-
-      - name: MCP image read
-        run: |
-          args=(
-            --fail-with-body --silent --show-error --max-time 30
-            -X POST "$MCP_URL"
-            -H 'Content-Type: application/json'
-            -H 'Accept: application/json, text/event-stream'
-            -H "MCP-Protocol-Version: $MCP_PROTOCOL_VERSION"
-            --data-binary '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_asset","arguments":{"asset_id":"5aa94b4a-69e1-416a-9c89-7290ddddeb7d","include_image":true}}}'
-          )
-          if [ -n "$MCP_SESSION_ID" ]; then args+=(-H "Mcp-Session-Id: $MCP_SESSION_ID"); fi
-          curl "${args[@]}" -o /tmp/mcp-asset.raw
-          python .github/scripts/parse-mcp-response.py /tmp/mcp-asset.raw /tmp/mcp-asset.json
-          if jq -e '.result.isError == true' /tmp/mcp-asset.json >/dev/null; then
-            echo 'Reference smoke asset is no longer available; skipping image-content assertion.'
-          else
-            jq -e '.result.content | map(.type) | index("image") != null' /tmp/mcp-asset.json >/dev/null
-            jq -e '.result.structuredContent.asset.mime_type | startswith("image/")' /tmp/mcp-asset.json >/dev/null
-          fi
+          jq -e '.result.structuredContent.catalog.id == "eye_color" and (.result.structuredContent.options | length > 0)' /tmp/mcp-catalog.json >/dev/null
 
       - name: Mark MCP smoke success
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          payload=$(jq -n \
-            --arg state success \
-            --arg target_url "$MCP_URL/health" \
-            --arg description "MCP handshake, tools, DB reads and image content passed" \
-            --arg context "mcp/smoke" \
-            '{state:$state,target_url:$target_url,description:$description,context:$context}')
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "$payload" >/dev/null
+          payload=$(jq -n --arg state success --arg target_url "$MCP_URL/health" --arg description "MCP v0.2 search, preset+assets, visual image and generation prep passed" --arg context "mcp/smoke" '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "$payload" >/dev/null
 
       - name: Mark MCP smoke failure
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          payload=$(jq -n \
-            --arg state failure \
-            --arg target_url "$MCP_URL/health" \
-            --arg description "CharacterMaker MCP smoke test failed" \
-            --arg context "mcp/smoke" \
-            '{state:$state,target_url:$target_url,description:$description,context:$context}')
-          curl --fail-with-body --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "$payload" >/dev/null
+          payload=$(jq -n --arg state failure --arg target_url "$MCP_URL/health" --arg description "CharacterMaker MCP v0.2 visual/generation smoke failed" --arg context "mcp/smoke" '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "$payload" >/dev/null
