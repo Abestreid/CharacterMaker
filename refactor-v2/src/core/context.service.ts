@@ -57,7 +57,7 @@ import {
   type WardrobeState,
 } from '../domain';
 import type { PresetAsset } from '../infrastructure/supabase/preset-assets.repository';
-import type { AiContext } from '../infrastructure/supabase/preset.repository';
+import type { AiContext, PresetKind } from '../infrastructure/supabase/preset.repository';
 import { characterMakerService } from './character-maker.service';
 
 export type LabeledValue = {
@@ -69,11 +69,26 @@ export type ContextAsset = {
   id: string;
   role: string;
   isPrimary: boolean;
+  sortOrder: number;
   referenceStatus: PresetAsset['referenceStatus'];
   publicUrl: string | null;
   mimeType: string | null;
   width: number | null;
   height: number | null;
+};
+
+export type VisualPackage = {
+  kind: PresetKind;
+  assetCount: number;
+  eligibleAssetCount: number;
+  canonicalCount: number;
+  approvedCount: number;
+  referenceQuality: 'canonical' | 'approved' | 'fallback' | 'none';
+  primaryFaceAsset: ContextAsset | null;
+  primaryBodyAsset: ContextAsset | null;
+  recommendedAssets: ContextAsset[];
+  recommendedAssetIds: string[];
+  warnings: string[];
 };
 
 export type EntityContext<TStructured> = {
@@ -93,10 +108,19 @@ export type OutfitContext = EntityContext<ReturnType<typeof describeOutfit>>;
 export type SceneContext = EntityContext<ReturnType<typeof describeScene>>;
 
 export type GenerationContext = {
-  schemaVersion: 'generation-context-v1';
+  schemaVersion: 'generation-context-v2';
   character: CharacterContext;
   outfit: OutfitContext | null;
   scene: SceneContext | null;
+  visualPackage: {
+    character: VisualPackage;
+    outfit: VisualPackage | null;
+    scene: VisualPackage | null;
+    recommendedAssets: ContextAsset[];
+    recommendedAssetIds: string[];
+    primaryFaceAssetId: string | null;
+    primaryBodyAssetId: string | null;
+  };
   canonicalAssets: ContextAsset[];
   referenceAssets: ContextAsset[];
 };
@@ -174,19 +198,146 @@ export async function buildGenerationContext(input: {
     input.outfitId ? getOutfitContext(input.outfitId) : Promise.resolve(null),
     input.sceneId ? getSceneContext(input.sceneId) : Promise.resolve(null),
   ]);
+
+  const characterVisual = buildVisualPackage('character', character.assets);
+  const outfitVisual = outfit ? buildVisualPackage('outfit', outfit.assets) : null;
+  const sceneVisual = scene ? buildVisualPackage('scene', scene.assets) : null;
+  const recommendedAssets = recommendedGenerationAssets(characterVisual, outfitVisual, sceneVisual);
   const allAssets = [
     ...character.assets,
     ...(outfit?.assets ?? []),
     ...(scene?.assets ?? []),
   ];
+
   return {
-    schemaVersion: 'generation-context-v1',
+    schemaVersion: 'generation-context-v2',
     character,
     outfit,
     scene,
+    visualPackage: {
+      character: characterVisual,
+      outfit: outfitVisual,
+      scene: sceneVisual,
+      recommendedAssets,
+      recommendedAssetIds: recommendedAssets.map((asset) => asset.id),
+      primaryFaceAssetId: characterVisual.primaryFaceAsset?.id ?? null,
+      primaryBodyAssetId: characterVisual.primaryBodyAsset?.id ?? null,
+    },
     canonicalAssets: allAssets.filter((asset) => asset.referenceStatus === 'canonical'),
     referenceAssets: allAssets.filter((asset) => asset.referenceStatus === 'canonical' || asset.referenceStatus === 'approved' || asset.referenceStatus === 'reference_only'),
   };
+}
+
+export function buildVisualPackage(kind: PresetKind, assets: readonly ContextAsset[]): VisualPackage {
+  const eligible = assets.filter((asset) => asset.referenceStatus !== 'rejected');
+  const ranked = [...eligible].sort((a, b) => assetScore(kind, b) - assetScore(kind, a));
+  const primaryFaceAsset = kind === 'character' ? ranked.find((asset) => isFaceRole(asset.role)) ?? null : null;
+  const primaryBodyAsset = kind === 'character' ? ranked.find((asset) => isBodyRole(asset.role)) ?? null : null;
+  const recommendedAssets = uniqueAssets([primaryFaceAsset, primaryBodyAsset, ...ranked].filter((asset): asset is ContextAsset => asset !== null));
+  const canonicalCount = eligible.filter((asset) => asset.referenceStatus === 'canonical').length;
+  const approvedCount = eligible.filter((asset) => asset.referenceStatus === 'approved').length;
+  const warnings: string[] = [];
+
+  if (eligible.length === 0) warnings.push('No active non-rejected visual assets are linked to this preset.');
+  if (eligible.length > 0 && canonicalCount === 0 && approvedCount === 0) warnings.push('No canonical/approved visual asset is available; fallback references are being used.');
+  if (kind === 'character' && eligible.length > 0 && !primaryFaceAsset) warnings.push('No face/portrait role is available.');
+  if (kind === 'character' && eligible.length > 0 && !primaryBodyAsset) warnings.push('No dedicated full-body/body-reference role is available.');
+
+  return {
+    kind,
+    assetCount: assets.length,
+    eligibleAssetCount: eligible.length,
+    canonicalCount,
+    approvedCount,
+    referenceQuality: canonicalCount > 0 ? 'canonical' : approvedCount > 0 ? 'approved' : eligible.length > 0 ? 'fallback' : 'none',
+    primaryFaceAsset,
+    primaryBodyAsset,
+    recommendedAssets,
+    recommendedAssetIds: recommendedAssets.map((asset) => asset.id),
+    warnings,
+  };
+}
+
+function recommendedGenerationAssets(character: VisualPackage, outfit: VisualPackage | null, scene: VisualPackage | null): ContextAsset[] {
+  const face = character.primaryFaceAsset;
+  const body = character.primaryBodyAsset;
+  const outfitPrimary = outfit?.recommendedAssets[0] ?? null;
+  const scenePrimary = scene?.recommendedAssets[0] ?? null;
+  return uniqueAssets([
+    face,
+    body,
+    outfitPrimary,
+    scenePrimary,
+    ...character.recommendedAssets,
+    ...(outfit?.recommendedAssets ?? []),
+    ...(scene?.recommendedAssets ?? []),
+  ].filter((asset): asset is ContextAsset => asset !== null));
+}
+
+function uniqueAssets(assets: readonly ContextAsset[]): ContextAsset[] {
+  const seen = new Set<string>();
+  return assets.filter((asset) => {
+    if (seen.has(asset.id)) return false;
+    seen.add(asset.id);
+    return true;
+  });
+}
+
+function assetScore(kind: PresetKind, asset: ContextAsset): number {
+  const statusScore: Record<ContextAsset['referenceStatus'], number> = {
+    canonical: 5000,
+    approved: 4000,
+    reference_only: 3000,
+    normal: 1000,
+    rejected: -100000,
+  };
+  return statusScore[asset.referenceStatus] + (asset.isPrimary ? 500 : 0) + roleScore(kind, asset.role) - asset.sortOrder;
+}
+
+function roleScore(kind: PresetKind, role: string): number {
+  const character: Record<string, number> = {
+    face_closeup: 1200,
+    face: 1150,
+    portrait: 1100,
+    headshot: 1050,
+    full_front: 1000,
+    full_body_front: 1000,
+    body_reference: 950,
+    full_body: 900,
+    left_profile: 800,
+    right_profile: 800,
+    profile: 790,
+    hair_reference: 700,
+    full_back: 650,
+    reference: 500,
+    cover: 400,
+  };
+  const outfit: Record<string, number> = {
+    on_model: 1100,
+    front: 1050,
+    cover: 1000,
+    back: 800,
+    side: 750,
+    detail: 650,
+    texture: 600,
+    reference: 500,
+  };
+  const scene: Record<string, number> = {
+    reference: 1100,
+    background_reference: 1050,
+    style_reference: 1000,
+    preview: 900,
+    cover: 850,
+  };
+  return (kind === 'character' ? character : kind === 'outfit' ? outfit : scene)[role] ?? 100;
+}
+
+function isFaceRole(role: string): boolean {
+  return ['face_closeup', 'face', 'portrait', 'headshot', 'left_profile', 'right_profile', 'profile'].includes(role);
+}
+
+function isBodyRole(role: string): boolean {
+  return ['full_front', 'full_body_front', 'body_reference', 'full_body', 'full_back'].includes(role);
 }
 
 function describeCharacter(state: CharacterState) {
@@ -322,6 +473,7 @@ function contextAsset(asset: PresetAsset): ContextAsset {
     id: asset.id,
     role: asset.role,
     isPrimary: asset.isPrimary,
+    sortOrder: asset.sortOrder,
     referenceStatus: asset.referenceStatus,
     publicUrl: asset.publicUrl,
     mimeType: asset.mimeType,
