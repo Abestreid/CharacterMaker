@@ -6,6 +6,7 @@ import {
   PersonStanding,
   RotateCcw,
   Shirt,
+  Sparkles,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router';
@@ -27,6 +28,7 @@ const navigation = [
   { to: '/wardrobe', label: 'Образ', icon: Shirt },
   { to: '/scene', label: 'Сцена', icon: Camera },
   { to: '/results', label: 'Результаты', icon: Images },
+  { to: '/ai', label: 'AI', icon: Sparkles },
 ] as const;
 
 type ActiveCharacterPresetView = {
@@ -91,7 +93,7 @@ export function AppShell() {
       </div>
 
       <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/94 px-2 pt-1 backdrop-blur-xl lg:hidden">
-        <div className="mx-auto grid max-w-xl grid-cols-4 gap-1">
+        <div className="mx-auto grid max-w-xl grid-cols-5 gap-1">
           {navigation.map((item) => <MobileNavItem key={item.to} {...item} />)}
         </div>
       </nav>
