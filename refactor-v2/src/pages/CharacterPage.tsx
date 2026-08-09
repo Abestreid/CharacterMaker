@@ -44,15 +44,17 @@ import {
   TextArea,
   Toggle,
 } from '../components/ui';
+import { PersonaPhotoGenerator } from '../features/persona-photo-generator/PersonaPhotoGenerator';
 import { useEditorStore } from '../store/editor-store';
 
-type CharacterSection = 'basic' | 'body' | 'face' | 'hair' | 'makeup' | 'details' | 'tattoos';
+type CharacterSection = 'basic' | 'body' | 'face' | 'hair' | 'photos' | 'makeup' | 'details' | 'tattoos';
 
 const sections = [
   { id: 'basic', label: 'Основное' },
   { id: 'body', label: 'Тело' },
   { id: 'face', label: 'Лицо' },
   { id: 'hair', label: 'Волосы' },
+  { id: 'photos', label: 'Фото' },
   { id: 'makeup', label: 'Макияж' },
   { id: 'details', label: 'Особенности' },
   { id: 'tattoos', label: 'Тату' },
@@ -163,6 +165,8 @@ export function CharacterPage() {
           </SectionCard>
         </div>
       ) : null}
+
+      {section === 'photos' ? <PersonaPhotoGenerator /> : null}
 
       {section === 'makeup' ? (
         <SectionCard description="Дополнительные поля появляются только после включения макияжа." title="Макияж">
