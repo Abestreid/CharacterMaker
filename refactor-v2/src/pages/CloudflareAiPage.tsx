@@ -16,7 +16,9 @@ import {
   CLOUDFLARE_ACCOUNT_ID,
   CLOUDFLARE_IMAGE_MODEL,
   generateCloudflareImage,
+  getRememberedCloudflareToken,
   prepareCloudflareReference,
+  rememberCloudflareToken,
   verifyCloudflareToken,
 } from '../features/cloudflare-ai/cloudflare-ai.client';
 
@@ -34,7 +36,7 @@ type PreparedReference = {
 const DEFAULT_PROMPT = 'Photorealistic smartphone photograph, natural skin texture, realistic proportions, soft natural daylight, detailed face, high photographic quality.';
 
 export function CloudflareAiPage() {
-  const [token, setToken] = useState('');
+  const [token, setToken] = useState(() => getRememberedCloudflareToken());
   const [showToken, setShowToken] = useState(false);
   const [tokenStatus, setTokenStatus] = useState<'idle' | 'active' | 'invalid'>('idle');
   const [tokenMessage, setTokenMessage] = useState('');
@@ -149,7 +151,7 @@ export function CloudflareAiPage() {
 
       <div className="space-y-3 sm:space-y-4">
         <SectionCard
-          description="Токен хранится только в состоянии этой вкладки браузера. Он не записывается в Supabase, localStorage или GitHub."
+          description="Токен хранится только в памяти текущего SPA-сеанса. Он не записывается в Supabase, localStorage или GitHub и может использоваться встроенным мастером фото Персоны до перезагрузки страницы."
           title="Подключение Workers AI"
         >
           <div className="grid gap-2 sm:grid-cols-2">
@@ -165,7 +167,9 @@ export function CloudflareAiPage() {
                 autoComplete="off"
                 className="min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground sm:text-sm"
                 onChange={(event) => {
-                  setToken(event.target.value);
+                  const value = event.target.value;
+                  setToken(value);
+                  rememberCloudflareToken(value);
                   setTokenStatus('idle');
                   setTokenMessage('');
                 }}
