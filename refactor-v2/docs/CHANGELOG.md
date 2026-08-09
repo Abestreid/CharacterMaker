@@ -4,6 +4,23 @@
 
 ## 2026-08-09
 
+### Persona canonical photo wizard integrated into Persona editor
+
+- перед изменениями создана резервная ветка `backup/dev-2026-08-09-pre-persona-photo-generator`;
+- в экран `Персона` добавлена отдельная вкладка `Фото`, свободная страница `#/ai` сохранена как диагностическая песочница;
+- добавлен последовательный мастер 5 канонических кадров: `face_closeup -> portrait -> full_front -> full_back -> profile_left`;
+- каждый следующий шаг разблокируется только после сохранения предыдущих кадров, поэтому ранее подтвержденные каноны становятся визуальными референсами следующих генераций;
+- prompt builder передает только релевантный срез `CharacterState`: лицо получает identity/face/skin/hair/makeup/permanent features, торс дополнительно верхнюю часть тела, полный рост - полную антропометрию и параметры формы тела;
+- для телесных кадров используется временный бежевый спортивный комплект: непрозрачный облегающий короткий топ + короткие облегающие спортивные шорты, без логотипов и аксессуаров; он не меняет сохраненный Образ;
+- для профилей младше 18 лет автоматически используется закрытый calibration outfit: бежевая спортивная футболка и шорты до колена;
+- до 4 Cloudflare references выбираются по semantic role и качеству `canonical > approved > reference_only > normal`, rejected исключаются;
+- результат сохраняется через существующий Core: физический файл -> InfinityFree, asset metadata/relation -> Supabase, `reference_status=canonical`;
+- при замене слота новый файл сначала полностью сохраняется, только потом удаляются старые assets той же роли;
+- Cloudflare token может переиспользоваться между `AI` и `Персона -> Фото` только в памяти текущего SPA-сеанса и по-прежнему не попадает в GitHub, Supabase, Zustand persistence или localStorage;
+- Supabase migration не понадобилась: текущая схема `character_assets` уже поддерживает все необходимые роли и canonical reference status;
+- добавлены регрессионные тесты границ prompt context, чтобы face/torso/full-body не начали получать лишние параметры в будущих изменениях;
+- подробности: `docs/changes/2026-08-09-persona-canonical-photo-wizard.md`.
+
 ### Isolated Cloudflare Workers AI image-generation module
 
 - добавлен отдельный route `#/ai` и пункт `AI` в desktop/mobile навигации без изменения существующего CRUD Персоны, Образа и Сцены;
