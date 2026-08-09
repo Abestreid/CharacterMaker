@@ -46,7 +46,7 @@ export type CharacterPhotoStep = {
   height: number;
 };
 
-export const CHARACTER_PHOTO_STEPS: readonly CharacterPhotoStep[] = [
+export const CHARACTER_PHOTO_STEPS = [
   {
     role: 'face_closeup',
     label: 'Лицо крупно',
@@ -92,7 +92,7 @@ export const CHARACTER_PHOTO_STEPS: readonly CharacterPhotoStep[] = [
     width: 768,
     height: 1024,
   },
-];
+] as const satisfies readonly CharacterPhotoStep[];
 
 export const DEFAULT_CANONICAL_OUTFIT = 'opaque fitted beige sports set: short sports crop top and short fitted athletic shorts, matte fabric, no logos, no patterns, no accessories';
 
@@ -179,7 +179,7 @@ function faceParameterLines(character: CharacterState): string[] {
   if (character.appearance.hair.details.trim()) lines.push(`HAIR_DETAILS: ${character.appearance.hair.details.trim()}`);
 
   if (character.makeup.enabled) {
-    lines.push(`MAKEUP_ENABLED: yes`);
+    lines.push('MAKEUP_ENABLED: yes');
     lines.push(`EYELINER: ${optionValue(EYELINER_STYLES, character.makeup.eyelinerStyleId)}`);
     lines.push(`EYESHADOW: ${optionValue(EYESHADOW_COLORS, character.makeup.eyeshadowColorId)}`);
     lines.push(`LIPSTICK: ${optionValue(LIPSTICK_COLORS, character.makeup.lipstickColorId)}`);
