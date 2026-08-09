@@ -2,6 +2,23 @@
 
 Журнал фиксирует изменения ветки `refactor/domain-catalog-v2`. Новые записи добавляются сверху внутри соответствующей даты.
 
+## 2026-08-09
+
+### Isolated Cloudflare Workers AI image-generation module
+
+- добавлен отдельный route `#/ai` и пункт `AI` в desktop/mobile навигации без изменения существующего CRUD Персоны, Образа и Сцены;
+- добавлена mobile-first страница `CloudflareAiPage` для проверки токена и генерации непосредственно с телефона;
+- добавлен изолированный client adapter `src/features/cloudflare-ai/cloudflare-ai.client.ts`;
+- добавлен same-origin PHP proxy `public/api/cloudflare-ai.php`;
+- используется Cloudflare Account ID `b42a877844f90e5af0c85866814e1ab4` и модель `@cf/black-forest-labs/flux-2-klein-4b`;
+- поддержана проверка токена через `/user/tokens/verify`, text-to-image и до 4 `input_image_0..3` references;
+- reference images автоматически уменьшаются в браузере до max side 511 px перед отправкой;
+- результат отображается в UI и доступен для скачивания;
+- Cloudflare API Token намеренно не сохраняется в Git, Supabase, localStorage или публичном bundle: пользователь вводит его в текущей вкладке, после чего он передается PHP proxy только на время запроса;
+- Supabase schema, migrations, Core preset CRUD, editor store, media.php и MCP в этом изменении не менялись;
+- обновлены правила разработки: Cloudflare Workers AI разрешен только как внешний генерационный backend, но не как storage или источник данных пресетов;
+- подробности: `docs/changes/2026-08-09-cloudflare-workers-ai-module.md`.
+
 ## 2026-08-08
 
 ### MCP v0.2.0 visual and native-generation workflow
