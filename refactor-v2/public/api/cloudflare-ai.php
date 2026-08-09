@@ -36,7 +36,7 @@ function tokenFromRequest(): string {
 }
 
 function curlAvailable(): void {
-    if (!function_exists('curl_init')) {
+    if (!function_exists('curl_init') || !class_exists('CURLFile')) {
         fail('На сервере недоступно PHP-расширение cURL, необходимое для Workers AI.', 500);
     }
 }
@@ -78,7 +78,7 @@ function cloudflareRequest(string $url, string $token, string $method = 'GET', a
     if (!is_array($payload)) {
         fail('Cloudflare вернул ответ в неожиданном формате.', 502, [
             'httpCode' => $httpCode,
-            'response' => mb_substr((string)$body, 0, 500),
+            'response' => substr((string)$body, 0, 500),
         ]);
     }
 
@@ -168,10 +168,11 @@ function detectImageMime(string $binary): string {
 }
 
 function generateImage(): never {
+    curlAvailable();
     $token = tokenFromRequest();
     $prompt = trim((string)($_POST['prompt'] ?? ''));
     if ($prompt === '') fail('Введите prompt для генерации.');
-    if (mb_strlen($prompt) > 5000) fail('Prompt слишком длинный. Максимум 5000 символов.');
+    if (strlen($prompt) > 20000) fail('Prompt слишком длинный.');
 
     $width = intField('width', 1024, 256, 1920);
     $height = intField('height', 1024, 256, 1920);
