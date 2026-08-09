@@ -2,6 +2,7 @@ export const CLOUDFLARE_ACCOUNT_ID = 'b42a877844f90e5af0c85866814e1ab4';
 export const CLOUDFLARE_IMAGE_MODEL = '@cf/black-forest-labs/flux-2-klein-4b';
 
 const API_URL = './api/cloudflare-ai.php';
+let rememberedCloudflareToken = '';
 
 export type CloudflareTokenStatus = {
   active: boolean;
@@ -28,6 +29,14 @@ export type CloudflareGenerateResult = {
   height: number;
 };
 
+export function rememberCloudflareToken(token: string): void {
+  rememberedCloudflareToken = token.trim();
+}
+
+export function getRememberedCloudflareToken(): string {
+  return rememberedCloudflareToken;
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => null) as (T & { error?: string }) | null;
   if (!response.ok) {
@@ -38,6 +47,7 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 export async function verifyCloudflareToken(token: string): Promise<CloudflareTokenStatus> {
+  rememberCloudflareToken(token);
   const response = await fetch(`${API_URL}?action=verify`, {
     method: 'POST',
     headers: {
@@ -48,6 +58,7 @@ export async function verifyCloudflareToken(token: string): Promise<CloudflareTo
 }
 
 export async function generateCloudflareImage(input: CloudflareGenerateInput): Promise<CloudflareGenerateResult> {
+  rememberCloudflareToken(input.token);
   const body = new FormData();
   body.append('prompt', input.prompt);
   body.append('width', String(input.width));
