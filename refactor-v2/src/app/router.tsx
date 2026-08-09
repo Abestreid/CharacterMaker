@@ -3,6 +3,7 @@ import { AppShell } from './AppShell';
 import { CharacterPresetPanel, OutfitPresetPanel, ScenePresetPanel } from '../components/presets/PresetPanels';
 import { CatalogsPage } from '../pages/CatalogsPage';
 import { CharacterPage } from '../pages/CharacterPage';
+import { CloudflareAiPage } from '../pages/CloudflareAiPage';
 import { ResultsPage } from '../pages/ResultsPage';
 import { ScenePage } from '../pages/ScenePage';
 import { WardrobePage } from '../pages/WardrobePage';
@@ -17,6 +18,7 @@ export const router = createHashRouter([
       { path: 'wardrobe', element: <><OutfitPresetPanel /><WardrobePage /></> },
       { path: 'scene', element: <><ScenePresetPanel /><ScenePage /></> },
       { path: 'results', Component: ResultsPage },
+      { path: 'ai', Component: CloudflareAiPage },
       { path: 'catalogs', Component: CatalogsPage },
       { path: '*', element: <Navigate replace to="/character" /> },
     ],
