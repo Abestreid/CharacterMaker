@@ -85,7 +85,7 @@ export function characterStateToPreset(identity: PresetIdentity, state: Characte
     hips_cm: state.body.hips,
     body_fat_percent: state.body.bodyFat,
     parameters,
-    metadata: { editor_schema: 'character-state-v3', editor_state: state },
+    metadata: { editor_schema: 'character-state-v3' },
   };
 }
 
@@ -112,7 +112,6 @@ export function wardrobeStateToOutfitPreset(identity: PresetIdentity, state: War
     parameters,
     metadata: {
       editor_schema: 'wardrobe-state-v2',
-      editor_state: state,
       layer_positions: ['base_layer', 'top', 'bottom', 'outerwear', 'footwear'],
     },
   };
@@ -140,14 +139,6 @@ export function sceneStateToPreset(identity: PresetIdentity, state: SceneState):
   if (state.lighting.mainLightColorId) parameters.push(option('light_color', state.lighting.mainLightColorId, 0));
   if (state.lighting.accentLightColorId) parameters.push(option('light_color', state.lighting.accentLightColorId, 1));
 
-  const editorState: SceneState = {
-    ...state,
-    reference: {
-      ...state.reference,
-      image: null,
-    },
-  };
-
   return {
     ...identityPayload(identity),
     schema_version: 'scene-state-v3',
@@ -159,7 +150,6 @@ export function sceneStateToPreset(identity: PresetIdentity, state: SceneState):
     parameters,
     metadata: {
       editor_schema: 'scene-state-v3',
-      editor_state: editorState,
       character_mode: state.character.mode,
       has_reference_image: Boolean(state.reference.image),
     },
