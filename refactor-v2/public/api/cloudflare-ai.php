@@ -2,7 +2,12 @@
 declare(strict_types=1);
 
 const CLOUDFLARE_ACCOUNT_ID = 'b42a877844f90e5af0c85866814e1ab4';
-const CLOUDFLARE_IMAGE_MODEL = '@cf/black-forest-labs/flux-2-klein-4b';
+const CLOUDFLARE_DEFAULT_IMAGE_MODEL = '@cf/black-forest-labs/flux-2-klein-9b';
+const CLOUDFLARE_ALLOWED_IMAGE_MODELS = [
+    '@cf/black-forest-labs/flux-2-klein-4b',
+    '@cf/black-forest-labs/flux-2-klein-9b',
+    '@cf/black-forest-labs/flux-2-dev',
+];
 const MAX_REFERENCE_BYTES = 8 * 1024 * 1024;
 const MAX_REFERENCES = 4;
 const REQUEST_TIMEOUT_SECONDS = 90;
@@ -129,6 +134,17 @@ function floatField(string $name, ?float $default, float $min, float $max): ?flo
     return $value;
 }
 
+function imageModelField(): string {
+    $model = trim((string)($_POST['model'] ?? CLOUDFLARE_DEFAULT_IMAGE_MODEL));
+    if (!in_array($model, CLOUDFLARE_ALLOWED_IMAGE_MODELS, true)) {
+        fail('Unsupported model.', 400, [
+            'model' => $model,
+            'allowedModels' => CLOUDFLARE_ALLOWED_IMAGE_MODELS,
+        ]);
+    }
+    return $model;
+}
+
 function referenceFile(string $field): ?CURLFile {
     if (!isset($_FILES[$field]) || !is_array($_FILES[$field])) return null;
     $file = $_FILES[$field];
@@ -153,7 +169,7 @@ function referenceFile(string $field): ?CURLFile {
     $height = (int)($imageInfo[1] ?? 0);
     if ($width < 1 || $height < 1) fail("{$field}: некорректные размеры изображения.");
     if ($width >= 512 || $height >= 512) {
-        fail("{$field}: FLUX.2 Klein требует референс меньше 512x512. Интерфейс должен уменьшить его автоматически.");
+        fail("{$field}: FLUX.2 reference image должен быть меньше 512x512. Интерфейс должен уменьшить его автоматически.");
     }
 
     $name = basename((string)($file['name'] ?? $field . '.jpg'));
@@ -174,6 +190,7 @@ function generateImage(): never {
     if ($prompt === '') fail('Введите prompt для генерации.');
     if (strlen($prompt) > 20000) fail('Prompt слишком длинный.');
 
+    $model = imageModelField();
     $width = intField('width', 1024, 256, 1920);
     $height = intField('height', 1024, 256, 1920);
     $guidance = floatField('guidance', null, 0.0, 20.0);
@@ -193,7 +210,7 @@ function generateImage(): never {
         if ($reference !== null) $fields[$field] = $reference;
     }
 
-    $url = 'https://api.cloudflare.com/client/v4/accounts/' . CLOUDFLARE_ACCOUNT_ID . '/ai/run/' . CLOUDFLARE_IMAGE_MODEL;
+    $url = 'https://api.cloudflare.com/client/v4/accounts/' . CLOUDFLARE_ACCOUNT_ID . '/ai/run/' . $model;
     $payload = cloudflareRequest($url, $token, 'POST', $fields);
     $imageBase64 = $payload['result']['image'] ?? null;
     if (!is_string($imageBase64) || $imageBase64 === '') {
@@ -207,7 +224,7 @@ function generateImage(): never {
     echo json_encode([
         'imageBase64' => $imageBase64,
         'mimeType' => $mime,
-        'model' => CLOUDFLARE_IMAGE_MODEL,
+        'model' => $model,
         'width' => $width,
         'height' => $height,
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
