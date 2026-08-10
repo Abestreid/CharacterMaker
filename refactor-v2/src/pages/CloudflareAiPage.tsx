@@ -79,7 +79,7 @@ export function CloudflareAiPage() {
     if (!selected.length) return;
     const remainingSlots = Math.max(0, 4 - references.length);
     if (remainingSlots === 0) {
-      setError('FLUX.2 Klein поддерживает максимум 4 референса.');
+      setError('FLUX.2 поддерживает максимум 4 референса.');
       return;
     }
 
@@ -125,6 +125,7 @@ export function CloudflareAiPage() {
         width: selectedSize.width,
         height: selectedSize.height,
         references: references.map((item) => item.file),
+        model: CLOUDFLARE_IMAGE_MODEL,
       });
       setResult({
         src: `data:${response.mimeType};base64,${response.imageBase64}`,
