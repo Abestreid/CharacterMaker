@@ -26,7 +26,7 @@ function character(body: Partial<CharacterState['body']>): CharacterState {
       skinDetails: '',
       eyeColorId: 'brown',
       hair: { lengthId: 'long', typeId: 'wavy', hairstyleId: 'loose', colorId: 'brunette', details: '' },
-      imageStyleId: 'photorealistic',
+      imageStyleId: 'hyperrealistic_photo',
     },
     face: {
       headShapeId: 'oval', foreheadSizeId: 'medium', eyebrowShapeId: 'curved', eyebrowThicknessId: 'medium',
