@@ -1,5 +1,5 @@
 export const CLOUDFLARE_ACCOUNT_ID = 'b42a877844f90e5af0c85866814e1ab4';
-export const CLOUDFLARE_IMAGE_MODEL = '@cf/black-forest-labs/flux-2-klein-4b';
+export const CLOUDFLARE_IMAGE_MODEL = '@cf/black-forest-labs/flux-2-klein-9b';
 export const CLOUDFLARE_IMAGE_DEFAULT_GUIDANCE = 1.0;
 
 const API_URL = './api/cloudflare-ai.php';
