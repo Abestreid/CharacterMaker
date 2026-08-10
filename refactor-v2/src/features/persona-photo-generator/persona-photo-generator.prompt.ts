@@ -35,6 +35,6 @@ export function buildCharacterPhotoPrompt(input: {
   return buildFlux2KleinPersonaPhotoPrompt({
     character: input.character,
     role: input.role,
-    referenceRoles: input.referenceRoles,
+    ...(input.referenceRoles ? { referenceRoles: input.referenceRoles } : {}),
   });
 }
