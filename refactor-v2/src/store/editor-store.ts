@@ -37,7 +37,7 @@ type EditorStore = {
   saveDraft: () => void;
 };
 
-type PersistedEditorState = Partial<Pick<
+type PersistedEditorState = Pick<
   EditorStore,
   | 'character'
   | 'wardrobe'
@@ -49,10 +49,12 @@ type PersistedEditorState = Partial<Pick<
   | 'wardrobeDirty'
   | 'sceneDirty'
   | 'savedAt'
->>;
+>;
+
+type LegacyPersistedEditorState = Partial<PersistedEditorState>;
 
 export const useEditorStore = create<EditorStore>()(
-  persist(
+  persist<EditorStore, [], [], PersistedEditorState>(
     (set) => ({
       character: clone(CHARACTER_DEFAULTS),
       wardrobe: clone(WARDROBE_DEFAULTS),
@@ -81,7 +83,7 @@ export const useEditorStore = create<EditorStore>()(
     {
       name: 'charactermaker-refactor-v2',
       version: 3,
-      partialize: (state) => ({
+      partialize: (state): PersistedEditorState => ({
         character: state.character,
         wardrobe: state.wardrobe,
         scene: {
@@ -101,22 +103,37 @@ export const useEditorStore = create<EditorStore>()(
         sceneDirty: state.sceneDirty,
         savedAt: state.savedAt,
       }),
-      migrate: (persistedState, version) => {
-        const previous = (persistedState ?? {}) as PersistedEditorState;
-        if (version >= 3) return previous as EditorStore;
+      migrate: (persistedState, version): PersistedEditorState => {
+        const previous = (persistedState ?? {}) as LegacyPersistedEditorState;
+        if (version >= 3) {
+          return {
+            character: previous.character ?? clone(CHARACTER_DEFAULTS),
+            wardrobe: previous.wardrobe ?? clone(WARDROBE_DEFAULTS),
+            scene: previous.scene ?? clone(SCENE_DEFAULTS),
+            activeCharacterId: previous.activeCharacterId ?? null,
+            activeOutfitId: previous.activeOutfitId ?? null,
+            activeSceneId: previous.activeSceneId ?? null,
+            characterDirty: previous.characterDirty ?? false,
+            wardrobeDirty: previous.wardrobeDirty ?? false,
+            sceneDirty: previous.sceneDirty ?? false,
+            savedAt: previous.savedAt ?? null,
+          };
+        }
 
         // V2 persisted an active preset id together with an independently editable local draft.
-        // After a reload the UI could therefore label stale local values as a loaded Supabase preset.
-        // Preserve the draft, but detach it from the saved preset once during migration.
+        // Preserve draft values, but detach all saved preset identities once during migration.
         return {
-          ...previous,
+          character: previous.character ?? clone(CHARACTER_DEFAULTS),
+          wardrobe: previous.wardrobe ?? clone(WARDROBE_DEFAULTS),
+          scene: previous.scene ?? clone(SCENE_DEFAULTS),
           activeCharacterId: null,
           activeOutfitId: null,
           activeSceneId: null,
           characterDirty: Boolean(previous.activeCharacterId),
           wardrobeDirty: Boolean(previous.activeOutfitId),
           sceneDirty: Boolean(previous.activeSceneId),
-        } as EditorStore;
+          savedAt: previous.savedAt ?? null,
+        };
       },
     },
   ),
