@@ -1,5 +1,6 @@
 export const CLOUDFLARE_ACCOUNT_ID = 'b42a877844f90e5af0c85866814e1ab4';
 export const CLOUDFLARE_IMAGE_MODEL = '@cf/black-forest-labs/flux-2-klein-4b';
+export const CLOUDFLARE_IMAGE_DEFAULT_GUIDANCE = 1.0;
 
 const API_URL = './api/cloudflare-ai.php';
 let rememberedCloudflareToken = '';
@@ -63,7 +64,7 @@ export async function generateCloudflareImage(input: CloudflareGenerateInput): P
   body.append('prompt', input.prompt);
   body.append('width', String(input.width));
   body.append('height', String(input.height));
-  if (typeof input.guidance === 'number') body.append('guidance', String(input.guidance));
+  body.append('guidance', String(input.guidance ?? CLOUDFLARE_IMAGE_DEFAULT_GUIDANCE));
   if (typeof input.seed === 'number') body.append('seed', String(input.seed));
   input.references.slice(0, 4).forEach((file, index) => body.append(`input_image_${index}`, file, file.name));
 
