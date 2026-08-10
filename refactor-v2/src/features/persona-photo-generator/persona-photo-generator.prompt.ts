@@ -1,7 +1,6 @@
 import {
   BREAST_FIRMNESS_OPTIONS,
   BREAST_SHAPES,
-  BREAST_SIZE_OPTIONS,
   BUTTOCK_FIRMNESS_OPTIONS,
   BUTTOCK_SHAPES,
   CHEEKBONE_TYPES,
@@ -29,6 +28,7 @@ import {
   NOSE_SHAPES,
   NOSE_SIZES,
   SKIN_TONES,
+  bodyDnaPromptLines,
   getLabelById,
   type CatalogOption,
   type CharacterState,
@@ -47,51 +47,11 @@ export type CharacterPhotoStep = {
 };
 
 export const CHARACTER_PHOTO_STEPS = [
-  {
-    role: 'face_closeup',
-    label: 'Лицо крупно',
-    shortLabel: 'Лицо',
-    description: 'Фронтальный крупный план. Формирует основной канон лицевой идентичности.',
-    contextLabel: 'Только лицо и идентичность',
-    width: 768,
-    height: 768,
-  },
-  {
-    role: 'portrait',
-    label: 'Портрет / торс',
-    shortLabel: 'Торс',
-    description: 'Фронтальный портрет от головы примерно до талии. Уточняет лицо и верхнюю часть тела.',
-    contextLabel: 'Лицо + верхняя часть тела',
-    width: 768,
-    height: 1024,
-  },
-  {
-    role: 'full_front',
-    label: 'Полный рост спереди',
-    shortLabel: 'Спереди',
-    description: 'Нейтральная стойка, полностью видны голова, корпус, ноги и стопы.',
-    contextLabel: 'Лицо + все параметры тела',
-    width: 768,
-    height: 1024,
-  },
-  {
-    role: 'full_back',
-    label: 'Полный рост сзади',
-    shortLabel: 'Сзади',
-    description: 'Нейтральная стойка строго спиной к камере для канона силуэта и пропорций.',
-    contextLabel: 'Идентичность + все параметры тела со спины',
-    width: 768,
-    height: 1024,
-  },
-  {
-    role: 'profile_left',
-    label: 'Профиль в полный рост',
-    shortLabel: 'Профиль',
-    description: 'Левый боковой профиль в полный рост без перспективных искажений.',
-    contextLabel: 'Лицо в профиль + все параметры тела',
-    width: 768,
-    height: 1024,
-  },
+  { role: 'face_closeup', label: 'Лицо крупно', shortLabel: 'Лицо', description: 'Фронтальный крупный план. Формирует основной канон лицевой идентичности.', contextLabel: 'Только лицо и идентичность', width: 768, height: 768 },
+  { role: 'portrait', label: 'Портрет / торс', shortLabel: 'Торс', description: 'Фронтальный портрет от головы примерно до талии. Уточняет лицо и верхнюю часть тела.', contextLabel: 'Лицо + верхняя часть тела', width: 768, height: 1024 },
+  { role: 'full_front', label: 'Полный рост спереди', shortLabel: 'Спереди', description: 'Нейтральная стойка, полностью видны голова, корпус, ноги и стопы.', contextLabel: 'Лицо + все параметры тела', width: 768, height: 1024 },
+  { role: 'full_back', label: 'Полный рост сзади', shortLabel: 'Сзади', description: 'Нейтральная стойка строго спиной к камере для канона силуэта и пропорций.', contextLabel: 'Идентичность + все параметры тела со спины', width: 768, height: 1024 },
+  { role: 'profile_left', label: 'Профиль в полный рост', shortLabel: 'Профиль', description: 'Левый боковой профиль в полный рост без перспективных искажений.', contextLabel: 'Лицо в профиль + все параметры тела', width: 768, height: 1024 },
 ] as const satisfies readonly CharacterPhotoStep[];
 
 export const DEFAULT_CANONICAL_OUTFIT = 'opaque fitted beige sports set: short sports crop top and short fitted athletic shorts, matte fabric, no logos, no patterns, no accessories';
@@ -119,12 +79,18 @@ export function buildCharacterPhotoPrompt(input: {
     lines.push('');
     lines.push('UPPER_BODY_PARAMETERS:');
     lines.push(...upperBodyParameterLines(character));
+    lines.push('');
+    lines.push('BODY_DNA_PROPORTIONS:');
+    lines.push(...bodyDnaPromptLines(character));
   }
 
   if (role === 'full_front' || role === 'full_back' || role === 'profile_left') {
     lines.push('');
     lines.push('FULL_BODY_PARAMETERS:');
     lines.push(...fullBodyParameterLines(character));
+    lines.push('');
+    lines.push('BODY_DNA_PROPORTIONS:');
+    lines.push(...bodyDnaPromptLines(character));
   }
 
   if (role !== 'face_closeup') {
@@ -139,14 +105,12 @@ export function buildCharacterPhotoPrompt(input: {
   if (referenceRoles.length > 0) {
     lines.push('');
     lines.push('REFERENCE_IMAGES:');
-    referenceRoles.forEach((referenceRole, index) => {
-      lines.push(`- image ${index}: ${referenceRole}. Use it only to preserve the same identity and the body/face information appropriate to that reference.`);
-    });
-    lines.push('Do not copy background, lighting, pose or accidental clothing details from reference images. Structured parameters in this prompt are the current source of truth.');
+    referenceRoles.forEach((referenceRole, index) => lines.push(`- image ${index}: ${referenceRole}. Use it only to preserve the same identity and the body/face information appropriate to that reference.`));
+    lines.push('Do not copy background, lighting, pose or accidental clothing details from reference images. Structured parameters and BodyDNA in this prompt are the current source of truth.');
   }
 
   lines.push('');
-  lines.push('QUALITY_RULES: same person, neutral expression, natural proportions, anatomically coherent hands and feet when visible, no crop of required body parts, no text, no watermark, no extra people.');
+  lines.push('QUALITY_RULES: same person, neutral expression, preserve BodyDNA ratios, natural anatomy, anatomically coherent hands and feet when visible, no crop of required body parts, no text, no watermark, no extra people.');
   return lines.join('\n');
 }
 
@@ -174,41 +138,34 @@ function faceParameterLines(character: CharacterState): string[] {
     `CHEEKBONES: ${optionValue(CHEEKBONE_TYPES, character.face.cheekboneTypeId)}`,
     `CHIN_SHAPE: ${optionValue(CHIN_SHAPES, character.face.chinShapeId)}`,
   ];
-
   if (character.appearance.skinDetails.trim()) lines.push(`SKIN_DETAILS: ${character.appearance.skinDetails.trim()}`);
   if (character.appearance.hair.details.trim()) lines.push(`HAIR_DETAILS: ${character.appearance.hair.details.trim()}`);
-
   if (character.makeup.enabled) {
     lines.push('MAKEUP_ENABLED: yes');
     lines.push(`EYELINER: ${optionValue(EYELINER_STYLES, character.makeup.eyelinerStyleId)}`);
     lines.push(`EYESHADOW: ${optionValue(EYESHADOW_COLORS, character.makeup.eyeshadowColorId)}`);
     lines.push(`LIPSTICK: ${optionValue(LIPSTICK_COLORS, character.makeup.lipstickColorId)}`);
     if (character.makeup.details.trim()) lines.push(`MAKEUP_DETAILS: ${character.makeup.details.trim()}`);
-  } else {
-    lines.push('MAKEUP_ENABLED: no');
-  }
-
+  } else lines.push('MAKEUP_ENABLED: no');
   if (character.permanentFeatures.trim()) lines.push(`PERMANENT_FEATURES: ${character.permanentFeatures.trim()}`);
   return lines;
 }
 
 function upperBodyParameterLines(character: CharacterState): string[] {
   const lines = [
+    `HEIGHT_CM: ${character.body.height}`,
+    `WEIGHT_KG: ${character.body.weight}`,
     `BUST_CM: ${character.body.bust}`,
     `WAIST_CM: ${character.body.waist}`,
+    `HIPS_CM: ${character.body.hips}`,
     `BODY_FAT_PERCENT: ${character.body.bodyFat}`,
     `MUSCLE_MASS: ${optionValue(MUSCLE_MASS_OPTIONS, character.body.muscleMassId)}`,
   ];
-
   if (character.identity.genderId === 'female') {
-    lines.push(`BREAST_SIZE: ${optionValue(BREAST_SIZE_OPTIONS, character.body.breastSizeId)}`);
     lines.push(`BREAST_SHAPE: ${optionValue(BREAST_SHAPES, character.body.breastShapeId)}`);
     lines.push(`BREAST_FIRMNESS: ${optionValue(BREAST_FIRMNESS_OPTIONS, character.body.breastFirmnessId)}`);
   }
-
-  if (character.tattoos.enabled && character.tattoos.description.trim()) {
-    lines.push(`VISIBLE_TATTOOS: preserve tattoos when they fall inside this framing; ${character.tattoos.description.trim()}`);
-  }
+  if (character.tattoos.enabled && character.tattoos.description.trim()) lines.push(`VISIBLE_TATTOOS: preserve tattoos when they fall inside this framing; ${character.tattoos.description.trim()}`);
   return lines;
 }
 
@@ -222,20 +179,14 @@ function fullBodyParameterLines(character: CharacterState): string[] {
     `BODY_FAT_PERCENT: ${character.body.bodyFat}`,
     `MUSCLE_MASS: ${optionValue(MUSCLE_MASS_OPTIONS, character.body.muscleMassId)}`,
   ];
-
   if (character.identity.genderId === 'female') {
-    lines.push(`BREAST_SIZE: ${optionValue(BREAST_SIZE_OPTIONS, character.body.breastSizeId)}`);
     lines.push(`BREAST_SHAPE: ${optionValue(BREAST_SHAPES, character.body.breastShapeId)}`);
     lines.push(`BREAST_FIRMNESS: ${optionValue(BREAST_FIRMNESS_OPTIONS, character.body.breastFirmnessId)}`);
     lines.push(`BUTTOCK_SHAPE: ${optionValue(BUTTOCK_SHAPES, character.body.buttockShapeId)}`);
     lines.push(`BUTTOCK_FIRMNESS: ${optionValue(BUTTOCK_FIRMNESS_OPTIONS, character.body.buttockFirmnessId)}`);
   }
-
-  if (character.tattoos.enabled) {
-    lines.push(character.tattoos.description.trim() ? `TATTOOS: ${character.tattoos.description.trim()}` : 'TATTOOS: enabled, preserve any visible tattoo identity marks');
-  } else {
-    lines.push('TATTOOS: none');
-  }
+  if (character.tattoos.enabled) lines.push(character.tattoos.description.trim() ? `TATTOOS: ${character.tattoos.description.trim()}` : 'TATTOOS: enabled, preserve any visible tattoo identity marks');
+  else lines.push('TATTOOS: none');
   return lines;
 }
 
@@ -248,9 +199,7 @@ function shotInstruction(role: CharacterPhotoRole): string {
 }
 
 function canonicalOutfit(character: CharacterState): string {
-  if (character.identity.age < 18) {
-    return 'opaque modest beige athletic T-shirt and beige knee-length athletic shorts, matte fabric, no logos, no patterns, no accessories';
-  }
+  if (character.identity.age < 18) return 'opaque modest beige athletic T-shirt and beige knee-length athletic shorts, matte fabric, no logos, no patterns, no accessories';
   return DEFAULT_CANONICAL_OUTFIT;
 }
 
