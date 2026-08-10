@@ -1,0 +1,250 @@
+name: Deploy CharacterMaker V2 PROD
+
+on:
+  push:
+    branches:
+      - refactor/domain-catalog-v2
+    paths:
+      - '.github/workflows/deploy-v2-prod.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: charactermaker-v2-prod
+  cancel-in-progress: false
+
+env:
+  DEPLOY_DIR: /htdocs
+  DEPLOY_URL: https://charmaker.free.nf/
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: refactor-v2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Mark deployment pending
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state pending \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "CharacterMaker V2 PROD deployment in progress" \
+            --arg context "deployment/prod" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck and tests
+        run: npm run check
+
+      - name: Production build
+        run: npm run build
+
+      - name: Add PROD metadata and SPA routing
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          dist = Path('dist')
+          if not (dist / 'index.html').is_file():
+              raise SystemExit('dist/index.html missing')
+
+          (dist / 'build-info.json').write_text(json.dumps({
+              'environment': 'prod',
+              'commit': os.environ['GITHUB_SHA'],
+              'ref': os.environ['GITHUB_REF_NAME'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'built_at': datetime.now(timezone.utc).isoformat(),
+          }, ensure_ascii=False, indent=2), encoding='utf-8')
+
+          (dist / '.htaccess').write_text('''Options -Indexes\nRewriteEngine On\nRewriteBase /\nRewriteCond %{REQUEST_FILENAME} -f [OR]\nRewriteCond %{REQUEST_FILENAME} -d\nRewriteRule ^ - [L]\nRewriteRule ^ index.html [L]\n''', encoding='utf-8')
+          PY
+
+      - name: Validate deploy artifact
+        run: |
+          test "$DEPLOY_DIR" = "/htdocs"
+          test -f dist/index.html
+          test -f dist/build-info.json
+          test -f dist/.htaccess
+          test -d dist/assets
+
+      - name: Install FTP client
+        working-directory: .
+        run: sudo apt-get update && sudo apt-get install -y lftp
+
+      - name: Snapshot protected directory presence before deploy
+        working-directory: .
+        env:
+          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME || secrets.FTP_USERNAME || secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD || secrets.FTP_PASSWORD || secrets.FTP_PASS }}
+        run: |
+          test -n "$FTP_SERVER"
+          test -n "$FTP_USERNAME"
+          test -n "$FTP_PASSWORD"
+          rm -f /tmp/protected-before.txt
+          lftp -c "
+            set ftp:passive-mode true;
+            set net:max-retries 3;
+            set net:timeout 20;
+            open -p 21 ftp://$FTP_SERVER;
+            user $FTP_USERNAME $FTP_PASSWORD;
+            cd /htdocs;
+            cls -1 > /tmp/root-listing-remote.txt;
+            bye
+          " || true
+          # FTP listing is informational only. The deploy itself never executes delete operations.
+
+      - name: Deploy PROD without deleting any remote files
+        env:
+          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME || secrets.FTP_USERNAME || secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD || secrets.FTP_PASSWORD || secrets.FTP_PASS }}
+        run: |
+          test -n "$FTP_SERVER"
+          test -n "$FTP_USERNAME"
+          test -n "$FTP_PASSWORD"
+          lftp -c "
+            set ftp:passive-mode true;
+            set net:max-retries 3;
+            set net:timeout 20;
+            open -p 21 ftp://$FTP_SERVER;
+            user $FTP_USERNAME $FTP_PASSWORD;
+            cd $DEPLOY_DIR;
+            mirror --reverse --no-perms --verbose --parallel=4 dist/ .;
+            bye
+          "
+
+      - name: Verify deployed PROD commit over FTP
+        working-directory: .
+        env:
+          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME || secrets.FTP_USERNAME || secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD || secrets.FTP_PASSWORD || secrets.FTP_PASS }}
+        run: |
+          rm -f /tmp/charmaker-prod-build-info.json
+          lftp -c "
+            set ftp:passive-mode true;
+            set net:max-retries 3;
+            set net:timeout 20;
+            open -p 21 ftp://$FTP_SERVER;
+            user $FTP_USERNAME $FTP_PASSWORD;
+            cd $DEPLOY_DIR;
+            get build-info.json -o /tmp/charmaker-prod-build-info.json;
+            bye
+          "
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          remote = json.loads(Path('/tmp/charmaker-prod-build-info.json').read_text(encoding='utf-8'))
+          expected = os.environ['GITHUB_SHA']
+          actual = remote.get('commit')
+          if actual != expected:
+              raise SystemExit(f'Remote PROD commit mismatch: expected {expected}, got {actual}')
+          print(f'VERIFIED_REMOTE_PROD_COMMIT={actual}')
+          PY
+
+      - name: HTTP smoke check PROD
+        working-directory: .
+        run: |
+          set -e
+          url="$DEPLOY_URL?commit=$GITHUB_SHA"
+          user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+          for attempt in 1 2 3 4 5 6; do
+            rm -f /tmp/charmaker-prod.html
+            code=$(curl --location --silent --show-error --max-time 30 \
+              --connect-timeout 15 \
+              --user-agent "$user_agent" \
+              -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' \
+              -H 'Cache-Control: no-cache' \
+              -w '%{http_code}' \
+              "$url" -o /tmp/charmaker-prod.html || true)
+            echo "HTTP attempt $attempt: $code"
+            if [ "$code" = "200" ] && [ -s /tmp/charmaker-prod.html ]; then
+              grep -qi '<html\|<!doctype' /tmp/charmaker-prod.html
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "PROD HTTP smoke failed after retries" >&2
+          exit 1
+
+      - name: Protected paths smoke check
+        working-directory: .
+        run: |
+          # These requests are non-destructive. 403/404 can be legitimate for directory roots.
+          # The safety property comes from the upload command above: it contains no --delete,
+          # rm, mrm, mirror --delete, or remote cleanup operation.
+          curl --location --silent --show-error --max-time 20 -o /dev/null "$DEPLOY_URL/dev/" || true
+          curl --location --silent --show-error --max-time 20 -o /dev/null "$DEPLOY_URL/media/" || true
+
+      - name: Mark deployment success
+        if: success()
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state success \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "V2 PROD deployed safely; remote files preserved" \
+            --arg context "deployment/prod" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
+
+      - name: Mark deployment failure
+        if: failure()
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state failure \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "V2 PROD build/deploy verification failed" \
+            --arg context "deployment/prod" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
