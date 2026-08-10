@@ -54,7 +54,7 @@ export const CHARACTER_PHOTO_STEPS = [
   { role: 'profile_left', label: 'Профиль в полный рост', shortLabel: 'Профиль', description: 'Левый боковой профиль в полный рост без перспективных искажений.', contextLabel: 'Лицо в профиль + все параметры тела', width: 768, height: 1024 },
 ] as const satisfies readonly CharacterPhotoStep[];
 
-export const DEFAULT_CANONICAL_OUTFIT = 'opaque fitted beige sports set: short sports crop top and short fitted athletic shorts, matte fabric, no logos, no patterns, no accessories';
+export const DEFAULT_CANONICAL_OUTFIT = 'opaque fitted beige athletic crop top ending clearly above the natural waist, plus low-to-mid-rise short fitted beige athletic shorts; the entire natural waist and waist-to-hip transition must remain visible, matte fabric, no logos, no patterns, no accessories';
 
 export function buildCharacterPhotoPrompt(input: {
   character: CharacterState;
@@ -97,6 +97,9 @@ export function buildCharacterPhotoPrompt(input: {
     lines.push('');
     lines.push(`TEMPORARY_REFERENCE_OUTFIT: ${canonicalOutfit(character)}.`);
     lines.push('The reference outfit is temporary calibration clothing only. Never treat it as a permanent identity feature. Keep the body silhouette readable and do not add outerwear, jewelry, bags, hats or props.');
+    if (character.identity.age >= 18 && (role === 'full_front' || role === 'full_back' || role === 'profile_left')) {
+      lines.push('CALIBRATION_VISIBILITY_RULE: the narrowest natural waist, both lateral waist contours, upper hip line and waist-to-hip transition must be plainly visible. Clothing must not cover the waist, use a high waistband, compress the torso, flatten the hips, or reshape the silhouette.');
+    }
   } else {
     lines.push('If shoulders/clothing are visible, use the same plain beige sports top. Do not add jewelry, hats, glasses or props.');
   }
@@ -153,11 +156,8 @@ function faceParameterLines(character: CharacterState): string[] {
 
 function upperBodyParameterLines(character: CharacterState): string[] {
   const lines = [
-    `HEIGHT_CM: ${character.body.height}`,
-    `WEIGHT_KG: ${character.body.weight}`,
     `BUST_CM: ${character.body.bust}`,
     `WAIST_CM: ${character.body.waist}`,
-    `HIPS_CM: ${character.body.hips}`,
     `BODY_FAT_PERCENT: ${character.body.bodyFat}`,
     `MUSCLE_MASS: ${optionValue(MUSCLE_MASS_OPTIONS, character.body.muscleMassId)}`,
   ];
