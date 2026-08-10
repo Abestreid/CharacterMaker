@@ -18,10 +18,16 @@ type EditorStore = {
   activeCharacterId: string | null;
   activeOutfitId: string | null;
   activeSceneId: string | null;
+  characterDirty: boolean;
+  wardrobeDirty: boolean;
+  sceneDirty: boolean;
   savedAt: string | null;
   setCharacter: (value: CharacterState) => void;
   setWardrobe: (value: WardrobeState) => void;
   setScene: (value: SceneState) => void;
+  loadCharacter: (value: CharacterState, id: string) => void;
+  loadWardrobe: (value: WardrobeState, id: string) => void;
+  loadScene: (value: SceneState, id: string) => void;
   setActiveCharacterId: (id: string | null) => void;
   setActiveOutfitId: (id: string | null) => void;
   setActiveSceneId: (id: string | null) => void;
@@ -30,6 +36,20 @@ type EditorStore = {
   resetScene: () => void;
   saveDraft: () => void;
 };
+
+type PersistedEditorState = Partial<Pick<
+  EditorStore,
+  | 'character'
+  | 'wardrobe'
+  | 'scene'
+  | 'activeCharacterId'
+  | 'activeOutfitId'
+  | 'activeSceneId'
+  | 'characterDirty'
+  | 'wardrobeDirty'
+  | 'sceneDirty'
+  | 'savedAt'
+>>;
 
 export const useEditorStore = create<EditorStore>()(
   persist(
@@ -40,21 +60,27 @@ export const useEditorStore = create<EditorStore>()(
       activeCharacterId: null,
       activeOutfitId: null,
       activeSceneId: null,
+      characterDirty: false,
+      wardrobeDirty: false,
+      sceneDirty: false,
       savedAt: null,
-      setCharacter: (character) => set({ character }),
-      setWardrobe: (wardrobe) => set({ wardrobe }),
-      setScene: (scene) => set({ scene }),
+      setCharacter: (character) => set({ character, characterDirty: true }),
+      setWardrobe: (wardrobe) => set({ wardrobe, wardrobeDirty: true }),
+      setScene: (scene) => set({ scene, sceneDirty: true }),
+      loadCharacter: (character, activeCharacterId) => set({ character, activeCharacterId, characterDirty: false }),
+      loadWardrobe: (wardrobe, activeOutfitId) => set({ wardrobe, activeOutfitId, wardrobeDirty: false }),
+      loadScene: (scene, activeSceneId) => set({ scene, activeSceneId, sceneDirty: false }),
       setActiveCharacterId: (activeCharacterId) => set({ activeCharacterId }),
       setActiveOutfitId: (activeOutfitId) => set({ activeOutfitId }),
       setActiveSceneId: (activeSceneId) => set({ activeSceneId }),
-      resetCharacter: () => set({ character: clone(CHARACTER_DEFAULTS), activeCharacterId: null }),
-      resetWardrobe: () => set({ wardrobe: clone(WARDROBE_DEFAULTS), activeOutfitId: null }),
-      resetScene: () => set({ scene: clone(SCENE_DEFAULTS), activeSceneId: null }),
+      resetCharacter: () => set({ character: clone(CHARACTER_DEFAULTS), activeCharacterId: null, characterDirty: false }),
+      resetWardrobe: () => set({ wardrobe: clone(WARDROBE_DEFAULTS), activeOutfitId: null, wardrobeDirty: false }),
+      resetScene: () => set({ scene: clone(SCENE_DEFAULTS), activeSceneId: null, sceneDirty: false }),
       saveDraft: () => set({ savedAt: new Date().toISOString() }),
     }),
     {
       name: 'charactermaker-refactor-v2',
-      version: 2,
+      version: 3,
       partialize: (state) => ({
         character: state.character,
         wardrobe: state.wardrobe,
@@ -68,8 +94,28 @@ export const useEditorStore = create<EditorStore>()(
         activeCharacterId: state.activeCharacterId,
         activeOutfitId: state.activeOutfitId,
         activeSceneId: state.activeSceneId,
+        characterDirty: state.characterDirty,
+        wardrobeDirty: state.wardrobeDirty,
+        sceneDirty: state.sceneDirty,
         savedAt: state.savedAt,
       }),
+      migrate: (persistedState, version) => {
+        const previous = (persistedState ?? {}) as PersistedEditorState;
+        if (version >= 3) return previous as EditorStore;
+
+        // V2 persisted an active preset id together with an independently editable local draft.
+        // After a reload the UI could therefore label stale local values as a loaded Supabase preset.
+        // Preserve the draft, but detach it from the saved preset once during migration.
+        return {
+          ...previous,
+          activeCharacterId: null,
+          activeOutfitId: null,
+          activeSceneId: null,
+          characterDirty: Boolean(previous.activeCharacterId),
+          wardrobeDirty: Boolean(previous.activeOutfitId),
+          sceneDirty: Boolean(previous.activeSceneId),
+        } as EditorStore;
+      },
     },
   ),
 );
