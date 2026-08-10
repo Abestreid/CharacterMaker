@@ -4,7 +4,7 @@ import { buildCharacterPhotoPrompt } from './persona-photo-generator.prompt';
 
 const character = (): CharacterState => JSON.parse(JSON.stringify(CHARACTER_DEFAULTS)) as CharacterState;
 
-describe('buildCharacterPhotoPrompt for FLUX.2 Klein 4B', () => {
+describe('buildCharacterPhotoPrompt for FLUX.2 Klein', () => {
   it('uses an English natural-language face prompt without body measurements', () => {
     const state = character();
     state.appearance.skinDetails = 'light freckles';
@@ -12,7 +12,7 @@ describe('buildCharacterPhotoPrompt for FLUX.2 Klein 4B', () => {
     state.permanentFeatures = 'small mole below left eye';
     state.tattoos = { enabled: true, description: 'large tattoo on lower back' };
 
-    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'face_closeup', personaName: 'Ксения' });
+    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'face_closeup', modelPreset: 'quality', personaName: 'Ксения' });
 
     expect(prompt).toContain('Canonical close-up portrait');
     expect(prompt).toContain('Identity appearance:');
@@ -30,7 +30,7 @@ describe('buildCharacterPhotoPrompt for FLUX.2 Klein 4B', () => {
     const state = character();
     state.tattoos = { enabled: true, description: 'small rose on left shoulder' };
 
-    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'portrait' });
+    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'portrait', modelPreset: 'quality' });
 
     expect(prompt).toContain('Canonical frontal upper-body portrait');
     expect(prompt).toContain('Upper-body geometry:');
@@ -47,7 +47,7 @@ describe('buildCharacterPhotoPrompt for FLUX.2 Klein 4B', () => {
     const state = character();
     state.tattoos = { enabled: true, description: 'small rose on left shoulder' };
 
-    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'full_front' });
+    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'full_front', modelPreset: 'quality' });
 
     expect(prompt).toContain('Canonical strict front-view full-body photograph');
     expect(prompt).toContain('Body geometry:');
@@ -76,7 +76,7 @@ describe('buildCharacterPhotoPrompt for FLUX.2 Klein 4B', () => {
     state.body.waist = 64;
     state.body.hips = 98;
 
-    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'full_front', personaName: 'Ксения' });
+    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'full_front', modelPreset: 'fast', personaName: 'Ксения' });
 
     expect(prompt).toContain('pear-shaped silhouette with a fuller lower body');
     expect(prompt).toContain('pronounced narrow waist');
@@ -97,6 +97,7 @@ describe('buildCharacterPhotoPrompt for FLUX.2 Klein 4B', () => {
     const prompt = buildCharacterPhotoPrompt({
       character: character(),
       role: 'full_back',
+      modelPreset: 'quality',
       referenceRoles: ['full_front', 'face_closeup', 'portrait'],
     });
 
@@ -111,10 +112,50 @@ describe('buildCharacterPhotoPrompt for FLUX.2 Klein 4B', () => {
     const state = character();
     state.identity.age = 17;
 
-    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'full_front' });
+    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'full_front', modelPreset: 'quality' });
 
     expect(prompt).toContain('opaque modest beige athletic T-shirt');
     expect(prompt).toContain('beige knee-length athletic shorts');
     expect(prompt).not.toContain('low-to-mid-rise short fitted beige athletic shorts');
+  });
+});
+
+describe('buildCharacterPhotoPrompt for FLUX.2 Dev', () => {
+  it('uses the dedicated natural-language BodyDNA adapter', () => {
+    const state = character();
+    state.body.height = 160;
+    state.body.weight = 58;
+    state.body.bust = 80;
+    state.body.waist = 64;
+    state.body.hips = 98;
+
+    const prompt = buildCharacterPhotoPrompt({
+      character: state,
+      role: 'full_front',
+      modelPreset: 'experimental',
+      referenceRoles: ['face_closeup', 'full_front'],
+    });
+
+    expect(prompt).toContain('BodyDNA:');
+    expect(prompt).toContain('The canonical physical anchors are 160 cm height, 58 kg weight and 80/64/98 cm bust-waist-hips');
+    expect(prompt).toContain('do not average these proportions toward a generic body');
+    expect(prompt).toContain('Use these images as hard identity and anatomy references');
+    expect(prompt).toContain('Do not slim, enlarge, stylize or normalize the saved body geometry.');
+    expect(prompt).not.toContain('Canonical measurement anchors:');
+    expect(prompt).not.toContain('Composition anchors: BMI');
+    expect(prompt).not.toMatch(/[А-Яа-яЁё]/);
+  });
+
+  it('drops Cyrillic free-text details instead of leaking them into the English-only dev prompt', () => {
+    const state = character();
+    state.appearance.skinDetails = 'светлые веснушки';
+    state.appearance.hair.details = 'пробор по центру';
+    state.permanentFeatures = 'родинка под левым глазом';
+
+    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'face_closeup', modelPreset: 'experimental' });
+
+    expect(prompt).not.toMatch(/[А-Яа-яЁё]/);
+    expect(prompt).not.toContain('светлые веснушки');
+    expect(prompt).not.toContain('пробор по центру');
   });
 });
