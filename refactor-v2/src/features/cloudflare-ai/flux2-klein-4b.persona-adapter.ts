@@ -117,7 +117,8 @@ function faceSentence(character: CharacterState): string {
 
 function hairSentence(character: CharacterState): string {
   const h = character.appearance.hair;
-  const extra = h.details.trim() ? ` Additional hair detail: ${h.details.trim()}.` : '';
+  const details = englishFreeText(h.details);
+  const extra = details ? ` Additional hair detail: ${details}.` : '';
   return `Hair: ${promptId(h.lengthId)}, ${promptId(h.typeId)}, ${promptId(h.hairstyleId)}, ${promptId(h.colorId)}.${extra}`;
 }
 
@@ -128,16 +129,20 @@ function makeupSentence(character: CharacterState): string {
     character.makeup.eyeshadowColorId ? `${promptId(character.makeup.eyeshadowColorId)} eyeshadow` : null,
     character.makeup.lipstickColorId ? `${promptId(character.makeup.lipstickColorId)} lipstick` : null,
   ].filter(Boolean);
-  const extra = character.makeup.details.trim() ? ` Additional makeup detail: ${character.makeup.details.trim()}.` : '';
+  const freeText = englishFreeText(character.makeup.details);
+  const extra = freeText ? ` Additional makeup detail: ${freeText}.` : '';
   return `Face styling: ${details.join(', ')}.${extra}`;
 }
 
 function stableDetailSentence(character: CharacterState, role: Flux2KleinPhotoRole): string {
   const details: string[] = [];
-  if (character.appearance.skinDetails.trim()) details.push(`Skin detail: ${character.appearance.skinDetails.trim()}.`);
-  if (character.permanentFeatures.trim()) details.push(`Permanent identity feature: ${character.permanentFeatures.trim()}.`);
-  if (character.tattoos.enabled && character.tattoos.description.trim() && role !== 'face_closeup') {
-    details.push(`Visible tattoo identity marks: ${character.tattoos.description.trim()}.`);
+  const skin = englishFreeText(character.appearance.skinDetails);
+  const permanent = englishFreeText(character.permanentFeatures);
+  const tattoo = englishFreeText(character.tattoos.description);
+  if (skin) details.push(`Skin detail: ${skin}.`);
+  if (permanent) details.push(`Permanent identity feature: ${permanent}.`);
+  if (character.tattoos.enabled && tattoo && role !== 'face_closeup') {
+    details.push(`Visible tattoo identity marks: ${tattoo}.`);
   }
   return details.join(' ');
 }
@@ -256,6 +261,12 @@ function buttockShape(id: string): string {
   if (id === 'a_shape') return 'A-shaped heart-like';
   if (id === 'v_shape') return 'V-shaped';
   return promptId(id);
+}
+
+function englishFreeText(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return /[\u0400-\u04FF]/u.test(trimmed) ? '' : trimmed;
 }
 
 function promptId(id: string | null | undefined): string {
