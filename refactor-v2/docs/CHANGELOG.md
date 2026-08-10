@@ -2,6 +2,21 @@
 
 Журнал фиксирует изменения ветки `refactor/domain-catalog-v2`. Новые записи добавляются сверху внутри соответствующей даты.
 
+## 2026-08-10
+
+### Cloudflare FLUX.2 model presets for Persona canonical photos
+
+- в `Персона -> Фото` добавлены три режима Workers AI: `Быстро` (`flux-2-klein-4b`), `Качество` (`flux-2-klein-9b`) и `Экспериментальное` (`flux-2-dev`);
+- режим `Качество` / Klein 9B установлен по умолчанию для пяти канонических кадров;
+- `generateCloudflareImage()` теперь получает явный model ID, а PHP proxy принимает его только из whitelist трех разрешенных моделей;
+- Klein 4B и Klein 9B используют общий строгий BodyDNA adapter, для FLUX.2 Dev добавлен отдельный более естественный prompt adapter с акцентом на stable identity, realistic anatomy и exact silhouette preservation;
+- для всех трех режимов сохранены BodyDNA ratios, absolute anchors, calibration clothing и semantic reference roles;
+- произвольный кириллический free-text временно исключается из prompt, пока нет отдельного надежного слоя английской нормализации, поэтому модельный prompt остается English-only;
+- диагностический `#/ai` синхронизирован с обязательным `model` contract и использует default Klein 9B;
+- regression tests расширены проверками model routing и English-only prompt behavior;
+- Supabase schema, данные пресетов, media storage и MCP contracts не изменялись;
+- подробности: `docs/changes/2026-08-10-cloudflare-flux-model-presets.md`.
+
 ## 2026-08-09
 
 ### Persona canonical photo wizard integrated into Persona editor
@@ -43,11 +58,11 @@
 - CharacterMaker MCP обновлен с `0.1.0` до `0.2.0` и развернут как Edge Function version 2 на прежнем endpoint;
 - добавлен `get_visual_package`: UUID/slug/exact name -> ranking сохраненных assets -> actual MCP image content в одном вызове;
 - добавлен `prepare_image_generation`: Persona + optional Outfit/Scene -> `generation-context-v2` + primary face/body + recommended references + actual image content + `host_action=native_image_generation`;
-- зафиксировано обязательное поведение MCP host: если пользователь просит создать изображение и host имеет native image generator, после `prepare_image_generation` он должен продолжить генерацию, а не останавливаться из-за отсутствия `generate_image` внутри CharacterMaker;
+- зафиксировано обязательное поведение MCP host: если пользователь просит создать изображение и host имеет native image generator, после `prepare_image_generation` он должен продолжить генерацию, а не останавливаться из-за отсутствия provider-specific `generate_image` внутри CharacterMaker;
 - `search_presets` теперь ранжирует exact name/slug первым и возвращает `exact_match`, asset/canonical/approved counts и preview asset;
 - `get_preset` принимает UUID/slug/exact unique name, стабильно возвращает `include_assets=true`, не тащит binary images и не дублирует полную карточку в text + structured output;
 - `metadata.editor_state` исключен из MCP card output: source of truth для MCP - normal columns + normalized parameter rows;
-- добавлен ranking visual references: `canonical > approved > reference_only > normal`, rejected исключается, учитываются `is_primary`, semantic role и sort order;
+- добавлен ranking visual references: canonical > approved > reference_only > normal, rejected исключается, учитываются `is_primary`, semantic role и sort order;
 - multimodal workflow изолирует ошибки отдельных картинок и ограничивает combined inline payload 12 MB;
 - общий Web Core синхронизирован на `generation-context-v2`, добавлены `VisualPackage`, primary face/body и recommended asset IDs;
 - добавлены Core regression tests для canonical/primary/role ranking, rejected exclusion и missing body warning;
@@ -126,7 +141,7 @@
 
 ### MCP protocol smoke validation
 
-Добавлен постоянный внешний workflow `.github/workflows/mcp-smoke.yml`.
+Добавлен постоянный внешний GitHub workflow `.github/workflows/mcp-smoke.yml`.
 
 GitHub runner фактически подтвердил:
 
@@ -201,6 +216,6 @@ GitHub runner фактически подтвердил:
 
 - создана backup-ветка `backup/dev-2026-08-07-pre-core-mcp-fixes`;
 - создан snapshot Supabase `backup_20260807_1548`;
-- проверено совпадение количества строк по всем 25 таблицам между `public` и backup schema;
+- проверено совпадение количества строк по всем 25 таблицам между `public` и backup schema`;
 - добавлены обязательные правила ведения документации и changelog;
 - зафиксировано текущее ограничение проекта: Supabase Free + InfinityFree + GitHub, без Cloudflare/R2/Supabase Storage, без пользовательских ролей и аккаунтов на текущем этапе.
