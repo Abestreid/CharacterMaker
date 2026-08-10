@@ -103,7 +103,7 @@ PersonaPhotoModelPreset
 
 Catalog IDs продолжают преобразовываться в английские prompt tokens.
 
-Для произвольных пользовательских полей текущая реализация не выполняет автоматический перевод. Если free-text содержит кириллицу, Dev adapter временно исключает такой fragment из prompt вместо передачи русского текста модели. Это сохраняет English-only слой до появления отдельной надежной нормализации/перевода.
+Для произвольных пользовательских полей текущая реализация не выполняет автоматический перевод. Если free-text содержит кириллицу, оба model adapter - Klein и Dev - временно исключают такой fragment из prompt вместо передачи русского текста модели. Это сохраняет English-only слой для всех трех режимов до появления отдельной надежной нормализации/перевода.
 
 ## Совместимость диагностического AI route
 
@@ -111,14 +111,14 @@ Catalog IDs продолжают преобразовываться в англ�
 
 ## Тесты
 
-`persona-photo-generator.prompt.test.ts` обновлен под обязательный `modelPreset` и дополнен проверками FLUX.2 Dev:
+`persona-photo-generator.prompt.test.ts` обновлен под обязательный `modelPreset` и дополнен проверками model routing и English-only поведения:
 
 - Klein 4B/9B продолжают использовать прежний строгий adapter;
 - experimental действительно переключается на Dev adapter;
 - Dev получает BodyDNA и canonical anchors;
 - Dev получает жесткие instructions по identity/reference roles;
 - Dev не использует Klein-specific numeric block wording;
-- кириллический free-text не попадает в English-only Dev prompt.
+- кириллический free-text не попадает ни в Klein, ни в Dev prompt.
 
 ## База данных и media
 
