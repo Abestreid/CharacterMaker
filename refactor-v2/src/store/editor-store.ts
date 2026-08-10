@@ -91,9 +91,11 @@ export const useEditorStore = create<EditorStore>()(
             image: null,
           },
         },
-        activeCharacterId: state.activeCharacterId,
-        activeOutfitId: state.activeOutfitId,
-        activeSceneId: state.activeSceneId,
+        // A dirty local draft must never survive a reload while still claiming to be
+        // the saved Supabase preset. Keep the draft values, but detach the preset id.
+        activeCharacterId: state.characterDirty ? null : state.activeCharacterId,
+        activeOutfitId: state.wardrobeDirty ? null : state.activeOutfitId,
+        activeSceneId: state.sceneDirty ? null : state.activeSceneId,
         characterDirty: state.characterDirty,
         wardrobeDirty: state.wardrobeDirty,
         sceneDirty: state.sceneDirty,
