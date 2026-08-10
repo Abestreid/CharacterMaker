@@ -52,7 +52,7 @@ describe('buildCharacterPhotoPrompt', () => {
     expect(prompt).not.toContain('BUTTOCK_SHAPE:');
   });
 
-  it('adds full anthropometry and temporary beige sports outfit for full body', () => {
+  it('adds full anthropometry and waist-readable temporary beige sports outfit for full body', () => {
     const state = character();
     state.tattoos = { enabled: true, description: 'small rose on left shoulder' };
 
@@ -67,8 +67,11 @@ describe('buildCharacterPhotoPrompt', () => {
     expect(prompt).toContain('BODY_FAT_PERCENT: 22');
     expect(prompt).toContain('BUTTOCK_SHAPE:');
     expect(prompt).toContain('TATTOOS: small rose on left shoulder');
-    expect(prompt).toContain('opaque fitted beige sports set');
-    expect(prompt).toContain('short sports crop top and short fitted athletic shorts');
+    expect(prompt).toContain('opaque fitted beige athletic crop top ending clearly above the natural waist');
+    expect(prompt).toContain('low-to-mid-rise short fitted beige athletic shorts');
+    expect(prompt).toContain('CALIBRATION_VISIBILITY_RULE:');
+    expect(prompt).toContain('waist-to-hip transition must be plainly visible');
+    expect(prompt).toContain('must not cover the waist, use a high waistband');
   });
 
   it('describes sequential reference roles without importing their incidental scene details', () => {
@@ -93,6 +96,7 @@ describe('buildCharacterPhotoPrompt', () => {
 
     expect(prompt).toContain('opaque modest beige athletic T-shirt');
     expect(prompt).toContain('beige knee-length athletic shorts');
-    expect(prompt).not.toContain('short sports crop top and short fitted athletic shorts');
+    expect(prompt).not.toContain('low-to-mid-rise short fitted beige athletic shorts');
+    expect(prompt).not.toContain('CALIBRATION_VISIBILITY_RULE:');
   });
 });
