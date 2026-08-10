@@ -23,6 +23,11 @@ import {
   verifyCloudflareToken,
 } from '../cloudflare-ai/cloudflare-ai.client';
 import {
+  DEFAULT_PERSONA_PHOTO_MODEL_PRESET,
+  PERSONA_PHOTO_MODELS,
+  type PersonaPhotoModelPreset,
+} from '../cloudflare-ai/persona-photo-models';
+import {
   CHARACTER_PHOTO_STEPS,
   buildCharacterPhotoPrompt,
   type CharacterPhotoRole,
@@ -37,12 +42,15 @@ type GeneratedPhoto = {
   mimeType: string;
 };
 
+const PERSONA_PHOTO_MODEL_PRESETS = ['fast', 'quality', 'experimental'] as const satisfies readonly PersonaPhotoModelPreset[];
+
 export function PersonaPhotoGenerator() {
   const character = useEditorStore((state) => state.character);
   const activeCharacterId = useEditorStore((state) => state.activeCharacterId);
   const [assets, setAssets] = useState<PresetAsset[]>([]);
   const [personaName, setPersonaName] = useState('Персона');
   const [selectedRole, setSelectedRole] = useState<CharacterPhotoRole>('face_closeup');
+  const [selectedModelPreset, setSelectedModelPreset] = useState<PersonaPhotoModelPreset>(DEFAULT_PERSONA_PHOTO_MODEL_PRESET);
   const [token, setToken] = useState(() => getRememberedCloudflareToken());
   const [tokenStatus, setTokenStatus] = useState<'idle' | 'active' | 'invalid'>('idle');
   const [result, setResult] = useState<GeneratedPhoto | null>(null);
@@ -78,12 +86,14 @@ export function PersonaPhotoGenerator() {
   const selectedStep = CHARACTER_PHOTO_STEPS.find((step) => step.role === selectedRole) ?? CHARACTER_PHOTO_STEPS[0];
   const selectedIndex = CHARACTER_PHOTO_STEPS.findIndex((step) => step.role === selectedRole);
   const referenceAssets = useMemo(() => selectReferenceAssets(assets, selectedRole), [assets, selectedRole]);
+  const modelConfig = PERSONA_PHOTO_MODELS[selectedModelPreset];
   const prompt = useMemo(() => buildCharacterPhotoPrompt({
     character,
     role: selectedRole,
+    modelPreset: selectedModelPreset,
     personaName,
     referenceRoles: referenceAssets.map((asset) => asset.role),
-  }), [character, personaName, referenceAssets, selectedRole]);
+  }), [character, personaName, referenceAssets, selectedModelPreset, selectedRole]);
   const currentAsset = useMemo(() => bestAssetForRole(assets, selectedRole), [assets, selectedRole]);
   const selectedUnlocked = isStepUnlocked(selectedRole, assets);
   const anyBusy = busy !== 'idle';
@@ -138,6 +148,8 @@ export function PersonaPhotoGenerator() {
         width: selectedStep.width,
         height: selectedStep.height,
         references,
+        model: modelConfig.id,
+        guidance: modelConfig.guidance,
       });
       const file = base64ToFile(
         response.imageBase64,
@@ -153,7 +165,7 @@ export function PersonaPhotoGenerator() {
         mimeType: response.mimeType,
       });
       setTokenStatus('active');
-      setMessage('Кадр сгенерирован. Проверьте его и сохраните как канонический или перегенерируйте.');
+      setMessage(`Кадр сгенерирован: ${modelConfig.label}. Проверьте его и сохраните как канонический или перегенерируйте.`);
     } catch (reason: unknown) {
       setError(errorMessage(reason));
     } finally {
@@ -203,6 +215,14 @@ export function PersonaPhotoGenerator() {
   function changeStep(role: CharacterPhotoRole) {
     if (!isStepUnlocked(role, assets) && !bestAssetForRole(assets, role)) return;
     setSelectedRole(role);
+    setResult(null);
+    setError('');
+    setMessage('');
+  }
+
+  function changeModelPreset(preset: PersonaPhotoModelPreset) {
+    if (preset === selectedModelPreset) return;
+    setSelectedModelPreset(preset);
     setResult(null);
     setError('');
     setMessage('');
@@ -258,9 +278,36 @@ export function PersonaPhotoGenerator() {
       </SectionCard>
 
       <SectionCard
-        description="Токен не записывается в Supabase, GitHub или persistent store. Он нужен только браузеру для текущей сессии Workers AI."
+        description="Выберите модель генерации. Качество используется по умолчанию для канонических кадров. Токен не записывается в Supabase, GitHub или persistent store."
         title="Cloudflare Workers AI"
       >
+        <div>
+          <FieldLabel>Модель генерации</FieldLabel>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {PERSONA_PHOTO_MODEL_PRESETS.map((preset) => {
+              const config = PERSONA_PHOTO_MODELS[preset];
+              const active = selectedModelPreset === preset;
+              return (
+                <button
+                  aria-pressed={active}
+                  className={cn(
+                    'focus-ring min-h-20 rounded-2xl border p-3 text-left transition',
+                    active ? 'border-primary/60 bg-primary-soft' : 'border-border bg-input hover:bg-surface-strong',
+                  )}
+                  disabled={anyBusy}
+                  key={preset}
+                  onClick={() => changeModelPreset(preset)}
+                  type="button"
+                >
+                  <div className="text-sm font-semibold text-foreground">{config.label}</div>
+                  <div className="mt-1 text-[11px] font-medium text-primary">{config.shortDescription}</div>
+                  <div className="mt-1 text-[10px] leading-4 text-muted-foreground">{config.description}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <label className="block">
           <FieldLabel>API Token</FieldLabel>
           <input
@@ -289,10 +336,11 @@ export function PersonaPhotoGenerator() {
       </SectionCard>
 
       <SectionCard description={selectedStep.description} title={`${selectedIndex + 1}. ${selectedStep.label}`}>
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-4">
           <InfoCell label="Контекст" value={selectedStep.contextLabel} />
           <InfoCell label="Референсы" value={referenceAssets.length ? referenceAssets.map((asset) => asset.role).join(', ') : 'Нет - стартовый кадр'} />
           <InfoCell label="Формат" value={`${selectedStep.width}x${selectedStep.height}`} />
+          <InfoCell label="Модель" value={`${modelConfig.label} · ${modelConfig.id.replace('@cf/black-forest-labs/', '')}`} />
         </div>
 
         {selectedRole !== 'face_closeup' ? (
