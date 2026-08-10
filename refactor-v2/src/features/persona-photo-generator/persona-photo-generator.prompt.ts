@@ -1,8 +1,10 @@
 import type { CharacterState } from '../../domain';
+import { buildFlux2DevPersonaPhotoPrompt } from '../cloudflare-ai/flux2-dev.persona-adapter';
 import {
   FLUX2_KLEIN_CANONICAL_OUTFIT,
   buildFlux2KleinPersonaPhotoPrompt,
 } from '../cloudflare-ai/flux2-klein-4b.persona-adapter';
+import type { PersonaPhotoModelPreset } from '../cloudflare-ai/persona-photo-models';
 
 export type CharacterPhotoRole = 'face_closeup' | 'portrait' | 'full_front' | 'full_back' | 'profile_left';
 
@@ -29,9 +31,18 @@ export const DEFAULT_CANONICAL_OUTFIT = FLUX2_KLEIN_CANONICAL_OUTFIT;
 export function buildCharacterPhotoPrompt(input: {
   character: CharacterState;
   role: CharacterPhotoRole;
+  modelPreset: PersonaPhotoModelPreset;
   personaName?: string | null;
   referenceRoles?: readonly string[];
 }): string {
+  if (input.modelPreset === 'experimental') {
+    return buildFlux2DevPersonaPhotoPrompt({
+      character: input.character,
+      role: input.role,
+      ...(input.referenceRoles ? { referenceRoles: input.referenceRoles } : {}),
+    });
+  }
+
   return buildFlux2KleinPersonaPhotoPrompt({
     character: input.character,
     role: input.role,
