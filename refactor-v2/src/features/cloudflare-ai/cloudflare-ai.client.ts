@@ -18,6 +18,7 @@ export type CloudflareGenerateInput = {
   width: number;
   height: number;
   references: File[];
+  model: string;
   guidance?: number;
   seed?: number;
 };
@@ -64,6 +65,7 @@ export async function generateCloudflareImage(input: CloudflareGenerateInput): P
   body.append('prompt', input.prompt);
   body.append('width', String(input.width));
   body.append('height', String(input.height));
+  body.append('model', input.model);
   body.append('guidance', String(input.guidance ?? CLOUDFLARE_IMAGE_DEFAULT_GUIDANCE));
   if (typeof input.seed === 'number') body.append('seed', String(input.seed));
   input.references.slice(0, 4).forEach((file, index) => body.append(`input_image_${index}`, file, file.name));
