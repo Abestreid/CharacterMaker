@@ -118,6 +118,23 @@ describe('buildCharacterPhotoPrompt for FLUX.2 Klein', () => {
     expect(prompt).toContain('beige knee-length athletic shorts');
     expect(prompt).not.toContain('low-to-mid-rise short fitted beige athletic shorts');
   });
+
+  it('drops Cyrillic arbitrary details from Klein prompts until an English normalization layer exists', () => {
+    const state = character();
+    state.appearance.skinDetails = 'светлые веснушки';
+    state.appearance.hair.details = 'пробор по центру';
+    state.makeup.enabled = true;
+    state.makeup.details = 'легкий естественный макияж';
+    state.permanentFeatures = 'родинка под левым глазом';
+    state.tattoos = { enabled: true, description: 'роза на левом плече' };
+
+    const prompt = buildCharacterPhotoPrompt({ character: state, role: 'full_front', modelPreset: 'quality' });
+
+    expect(prompt).not.toMatch(/[А-Яа-яЁё]/);
+    expect(prompt).not.toContain('светлые веснушки');
+    expect(prompt).not.toContain('пробор по центру');
+    expect(prompt).not.toContain('роза на левом плече');
+  });
 });
 
 describe('buildCharacterPhotoPrompt for FLUX.2 Dev', () => {
