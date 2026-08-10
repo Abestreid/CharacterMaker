@@ -5,3 +5,4 @@ export * from './defaults';
 export * from './forms';
 export * from './validation';
 export * from './migration';
+export * from './body-normalizer';
