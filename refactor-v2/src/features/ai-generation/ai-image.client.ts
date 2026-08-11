@@ -116,7 +116,13 @@ async function generateWithCredential(input: AiGenerateInput & {
   const payload = await readJson<ApiGenerateResponse>(response);
 
   if (payload.async && payload.jobId) {
-    return pollAiHorde(payload.jobId, input.credential, input.width, input.height, input.apiModel);
+    return pollAiHorde(
+      payload.jobId,
+      input.credential,
+      payload.width ?? input.width,
+      payload.height ?? input.height,
+      input.apiModel,
+    );
   }
 
   if (!payload.imageBase64 || !payload.mimeType) throw new Error('AI provider не вернул изображение.');
@@ -172,8 +178,11 @@ function credentialFormData(credential: AiCredential): FormData {
 async function readJson<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => null) as (T & ApiErrorBody) | null;
   if (!response.ok) {
-    const suffix = payload?.code ? ` [${payload.code}]` : '';
-    throw new Error(`${payload?.error || `AI API вернул HTTP ${response.status}.`}${suffix}`);
+    const rawMessage = payload?.error || `AI API вернул HTTP ${response.status}.`;
+    const kudosRequired = /kudos|required kudos|heavy demand/i.test(rawMessage);
+    const normalizedCode = kudosRequired ? 'kudos_required' : payload?.code;
+    const suffix = normalizedCode ? ` [${normalizedCode}]` : '';
+    throw new Error(`${rawMessage}${suffix}`);
   }
   if (!payload) throw new Error('AI API вернул пустой ответ.');
   return payload;
