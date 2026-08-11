@@ -12,6 +12,7 @@ export type AiCredential = {
   label: string;
   enabled: boolean;
   apiKey: string;
+  hasApiKey?: boolean;
   accountId: string;
 };
 
@@ -40,6 +41,7 @@ export function createAiCredential(provider: AiProviderId): AiCredential {
     label: provider === 'cloudflare' ? 'Cloudflare account' : provider === 'aihorde' ? 'AI Horde key' : 'Pollinations key',
     enabled: true,
     apiKey: '',
+    hasApiKey: false,
     accountId: '',
   };
 }
@@ -49,8 +51,7 @@ export function loadAiSettings(): AiSettings {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return cloneDefaults();
-    const parsed = JSON.parse(raw) as Partial<AiSettings>;
-    return normalizeSettings(parsed);
+    return normalizeSettings(JSON.parse(raw) as Partial<AiSettings>);
   } catch {
     return cloneDefaults();
   }
@@ -75,7 +76,9 @@ export function resetAiSettings(): AiSettings {
 }
 
 export function getEnabledCredentials(provider: AiProviderId, settings = loadAiSettings()): AiCredential[] {
-  return settings.credentials.filter((credential) => credential.provider === provider && credential.enabled && credential.apiKey.trim());
+  return settings.credentials.filter((credential) => credential.provider === provider
+    && credential.enabled
+    && (credential.apiKey.trim() !== '' || credential.hasApiKey === true));
 }
 
 export function resolveApiModel(modelKey: AiImageModelKey, defaultModel: string, settings = loadAiSettings()): string {
@@ -92,6 +95,7 @@ function normalizeSettings(input: Partial<AiSettings>): AiSettings {
       label: String(credential.label || ''),
       enabled: credential.enabled !== false,
       apiKey: String(credential.apiKey || ''),
+      hasApiKey: credential.hasApiKey === true || Boolean(String(credential.apiKey || '').trim()),
       accountId: String(credential.accountId || ''),
     }))
     : [];
