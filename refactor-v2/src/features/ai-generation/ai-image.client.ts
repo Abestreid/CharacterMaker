@@ -7,7 +7,7 @@ import {
   type AiCredential,
 } from './ai-settings';
 
-const API_URL = './api/ai-image.php';
+const API_URL = './api/ai-image-server.php';
 const AI_HORDE_POLL_INTERVAL_MS = 2500;
 const AI_HORDE_MAX_POLLS = 72;
 
