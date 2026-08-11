@@ -10,7 +10,7 @@ export type AiImageModelConfig = {
   description: string;
   adapter: PersonaPhotoAdapterId;
   maxReferences: number;
-  guidance?: number;
+  guidance: number;
 };
 
 export const AI_PROVIDER_LABELS: Record<AiProviderId, string> = {
@@ -58,6 +58,7 @@ export const AI_IMAGE_MODELS = {
     description: 'Pollinations image model с поддержкой reference images. Использует Klein BodyDNA adapter.',
     adapter: 'pollinations-klein',
     maxReferences: 4,
+    guidance: 1.0,
   },
   'pollinations-nanobanana-2': {
     key: 'pollinations-nanobanana-2',
@@ -67,6 +68,7 @@ export const AI_IMAGE_MODELS = {
     description: 'Альтернативная image/edit модель Pollinations с reference image support.',
     adapter: 'pollinations-klein',
     maxReferences: 4,
+    guidance: 1.0,
   },
   'pollinations-gptimage': {
     key: 'pollinations-gptimage',
@@ -76,6 +78,7 @@ export const AI_IMAGE_MODELS = {
     description: 'Image/edit модель Pollinations для сравнительных генераций.',
     adapter: 'pollinations-klein',
     maxReferences: 4,
+    guidance: 1.0,
   },
   'aihorde-auto': {
     key: 'aihorde-auto',
@@ -85,6 +88,7 @@ export const AI_IMAGE_MODELS = {
     description: 'AI Horde выбирает доступный image worker. В /admin можно указать точное имя модели.',
     adapter: 'aihorde-sd',
     maxReferences: 1,
+    guidance: 7.0,
   },
 } as const satisfies Record<string, AiImageModelConfig>;
 
