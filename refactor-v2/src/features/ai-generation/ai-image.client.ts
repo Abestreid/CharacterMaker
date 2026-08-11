@@ -1,8 +1,8 @@
 import { prepareCloudflareReference } from '../cloudflare-ai/cloudflare-ai.client';
 import { getAiImageModel, type AiImageModelKey } from './ai-registry';
+import { fetchServerAiSettings } from './ai-settings.server';
 import {
   getEnabledCredentials,
-  loadAiSettings,
   resolveApiModel,
   type AiCredential,
 } from './ai-settings';
@@ -63,14 +63,14 @@ export async function verifyAiCredential(credential: AiCredential): Promise<AiCr
 }
 
 export async function generateAiImage(input: AiGenerateInput): Promise<AiGenerateResult> {
-  const settings = loadAiSettings();
+  const settings = await fetchServerAiSettings();
   const config = getAiImageModel(input.modelKey);
   if (!config) throw new Error(`Неизвестная AI model config: ${input.modelKey}.`);
   if (!settings.enabledModels[input.modelKey]) throw new Error(`Модель «${config.label}» выключена в /admin.`);
 
   const credentials = getEnabledCredentials(config.provider, settings);
   if (!credentials.length) {
-    throw new Error(`Для ${config.provider} нет активных credentials. Добавьте их в /admin.`);
+    throw new Error(`Для ${config.provider} нет активных серверных credentials. Добавьте их один раз в /admin.`);
   }
 
   const apiModel = resolveApiModel(input.modelKey, config.apiModel, settings);
@@ -160,7 +160,11 @@ async function prepareReferences(files: File[], provider: string, maxReferences:
 function credentialFormData(credential: AiCredential): FormData {
   const body = new FormData();
   body.append('provider', credential.provider);
-  body.append('api_key', credential.apiKey.trim());
+  if (credential.apiKey.trim()) {
+    body.append('api_key', credential.apiKey.trim());
+  } else {
+    body.append('credential_id', credential.id);
+  }
   if (credential.accountId.trim()) body.append('account_id', credential.accountId.trim());
   return body;
 }
