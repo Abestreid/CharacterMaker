@@ -1,12 +1,11 @@
 import {
-  Check,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ImagePlus,
   Loader2,
   Save,
-  ShieldCheck,
+  Settings2,
   Sparkles,
   TriangleAlert,
 } from 'lucide-react';
@@ -15,21 +14,23 @@ import { Button, FieldLabel, SectionCard, cn } from '../../components/ui';
 import { characterMakerService } from '../../core/character-maker.service';
 import type { PresetAsset } from '../../infrastructure/supabase/preset-assets.repository';
 import { useEditorStore } from '../../store/editor-store';
+import { generateAiImage } from '../ai-generation/ai-image.client';
 import {
-  generateCloudflareImage,
-  getRememberedCloudflareToken,
-  prepareCloudflareReference,
-  rememberCloudflareToken,
-  verifyCloudflareToken,
-} from '../cloudflare-ai/cloudflare-ai.client';
+  AI_IMAGE_MODELS,
+  AI_IMAGE_MODEL_KEYS,
+  AI_PROVIDER_LABELS,
+  GENERATION_MODE_META,
+  type AiImageModelKey,
+  type PersonaPhotoGenerationMode,
+} from '../ai-generation/ai-registry';
 import {
-  DEFAULT_PERSONA_PHOTO_MODEL_PRESET,
-  PERSONA_PHOTO_MODELS,
-  type PersonaPhotoModelPreset,
-} from '../cloudflare-ai/persona-photo-models';
+  getEnabledCredentials,
+  loadAiSettings,
+  type AiSettings,
+} from '../ai-generation/ai-settings';
 import {
   CHARACTER_PHOTO_STEPS,
-  buildCharacterPhotoPrompt,
+  buildCharacterPhotoPromptForAdapter,
   type CharacterPhotoRole,
 } from './persona-photo-generator.prompt';
 
@@ -42,7 +43,8 @@ type GeneratedPhoto = {
   mimeType: string;
 };
 
-const PERSONA_PHOTO_MODEL_PRESETS = ['fast', 'quality', 'experimental'] as const satisfies readonly PersonaPhotoModelPreset[];
+const GENERATION_MODES = ['fast', 'quality', 'experimental'] as const satisfies readonly PersonaPhotoGenerationMode[];
+const DEFAULT_GENERATION_MODE: PersonaPhotoGenerationMode = 'quality';
 
 export function PersonaPhotoGenerator() {
   const character = useEditorStore((state) => state.character);
@@ -50,11 +52,11 @@ export function PersonaPhotoGenerator() {
   const [assets, setAssets] = useState<PresetAsset[]>([]);
   const [personaName, setPersonaName] = useState('Персона');
   const [selectedRole, setSelectedRole] = useState<CharacterPhotoRole>('face_closeup');
-  const [selectedModelPreset, setSelectedModelPreset] = useState<PersonaPhotoModelPreset>(DEFAULT_PERSONA_PHOTO_MODEL_PRESET);
-  const [token, setToken] = useState(() => getRememberedCloudflareToken());
-  const [tokenStatus, setTokenStatus] = useState<'idle' | 'active' | 'invalid'>('idle');
+  const [aiSettings, setAiSettings] = useState<AiSettings>(() => loadAiSettings());
+  const [selectedMode, setSelectedMode] = useState<PersonaPhotoGenerationMode>(DEFAULT_GENERATION_MODE);
+  const [selectedModelKey, setSelectedModelKey] = useState<AiImageModelKey>(() => loadAiSettings().modeModels[DEFAULT_GENERATION_MODE]);
   const [result, setResult] = useState<GeneratedPhoto | null>(null);
-  const [busy, setBusy] = useState<'idle' | 'loading' | 'verifying' | 'generating' | 'saving'>('idle');
+  const [busy, setBusy] = useState<'idle' | 'loading' | 'generating' | 'saving'>('idle');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -83,51 +85,36 @@ export function PersonaPhotoGenerator() {
       .finally(() => setBusy('idle'));
   }, [activeCharacterId, refresh]);
 
+  useEffect(() => {
+    const reload = () => setAiSettings(loadAiSettings());
+    window.addEventListener('charactermaker:ai-settings-changed', reload);
+    window.addEventListener('storage', reload);
+    return () => {
+      window.removeEventListener('charactermaker:ai-settings-changed', reload);
+      window.removeEventListener('storage', reload);
+    };
+  }, []);
+
   const selectedStep = CHARACTER_PHOTO_STEPS.find((step) => step.role === selectedRole) ?? CHARACTER_PHOTO_STEPS[0];
   const selectedIndex = CHARACTER_PHOTO_STEPS.findIndex((step) => step.role === selectedRole);
   const referenceAssets = useMemo(() => selectReferenceAssets(assets, selectedRole), [assets, selectedRole]);
-  const modelConfig = PERSONA_PHOTO_MODELS[selectedModelPreset];
-  const prompt = useMemo(() => buildCharacterPhotoPrompt({
+  const modelConfig = AI_IMAGE_MODELS[selectedModelKey];
+  const providerCredentials = getEnabledCredentials(modelConfig.provider, aiSettings);
+  const prompt = useMemo(() => buildCharacterPhotoPromptForAdapter({
     character,
     role: selectedRole,
-    modelPreset: selectedModelPreset,
+    adapter: modelConfig.adapter,
     personaName,
     referenceRoles: referenceAssets.map((asset) => asset.role),
-  }), [character, personaName, referenceAssets, selectedModelPreset, selectedRole]);
+  }), [character, modelConfig.adapter, personaName, referenceAssets, selectedRole]);
   const currentAsset = useMemo(() => bestAssetForRole(assets, selectedRole), [assets, selectedRole]);
   const selectedUnlocked = isStepUnlocked(selectedRole, assets);
   const anyBusy = busy !== 'idle';
-
-  async function handleVerifyToken() {
-    const cleanToken = token.trim();
-    if (!cleanToken) {
-      setTokenStatus('invalid');
-      setError('Вставьте Cloudflare API Token.');
-      return;
-    }
-    setBusy('verifying');
-    setError('');
-    setMessage('');
-    try {
-      const response = await verifyCloudflareToken(cleanToken);
-      setTokenStatus(response.active ? 'active' : 'invalid');
-      setMessage(response.active ? 'Workers AI доступен.' : `Статус токена: ${response.status}.`);
-    } catch (reason: unknown) {
-      setTokenStatus('invalid');
-      setError(errorMessage(reason));
-    } finally {
-      setBusy('idle');
-    }
-  }
+  const canGenerate = providerCredentials.length > 0 && aiSettings.enabledModels[selectedModelKey];
 
   async function handleGenerate() {
     if (!activeCharacterId) {
       setError('Сначала сохраните или загрузите Персону как пресет. Канонические фото должны иметь character_id в Supabase.');
-      return;
-    }
-    const cleanToken = token.trim();
-    if (!cleanToken) {
-      setError('Вставьте Cloudflare API Token.');
       return;
     }
     if (!selectedUnlocked && !currentAsset) {
@@ -135,21 +122,31 @@ export function PersonaPhotoGenerator() {
       return;
     }
 
+    const freshSettings = loadAiSettings();
+    const freshCredentials = getEnabledCredentials(modelConfig.provider, freshSettings);
+    if (!freshSettings.enabledModels[selectedModelKey]) {
+      setError(`Модель «${modelConfig.label}» выключена. Включите ее в /admin или выберите другую модель.`);
+      return;
+    }
+    if (!freshCredentials.length) {
+      setError(`Для ${AI_PROVIDER_LABELS[modelConfig.provider]} нет активных credentials. Добавьте и проверьте их в /admin.`);
+      return;
+    }
+
+    setAiSettings(freshSettings);
     setBusy('generating');
     setError('');
     setMessage('');
     setResult(null);
-    rememberCloudflareToken(cleanToken);
     try {
-      const references = await Promise.all(referenceAssets.map(assetToCloudflareFile));
-      const response = await generateCloudflareImage({
-        token: cleanToken,
+      const references = await Promise.all(referenceAssets.map(assetToAiFile));
+      const response = await generateAiImage({
+        modelKey: selectedModelKey,
         prompt,
         width: selectedStep.width,
         height: selectedStep.height,
         references,
-        model: modelConfig.id,
-        guidance: modelConfig.guidance,
+        ...(typeof modelConfig.guidance === 'number' ? { guidance: modelConfig.guidance } : {}),
       });
       const file = base64ToFile(
         response.imageBase64,
@@ -164,8 +161,7 @@ export function PersonaPhotoGenerator() {
         height: response.height,
         mimeType: response.mimeType,
       });
-      setTokenStatus('active');
-      setMessage(`Кадр сгенерирован: ${modelConfig.label}. Проверьте его и сохраните как канонический или перегенерируйте.`);
+      setMessage(`Кадр сгенерирован: ${modelConfig.label}. Credential: ${response.credentialLabel}. Проверьте результат и сохраните как канон или перегенерируйте.`);
     } catch (reason: unknown) {
       setError(errorMessage(reason));
     } finally {
@@ -220,9 +216,20 @@ export function PersonaPhotoGenerator() {
     setMessage('');
   }
 
-  function changeModelPreset(preset: PersonaPhotoModelPreset) {
-    if (preset === selectedModelPreset) return;
-    setSelectedModelPreset(preset);
+  function changeGenerationMode(mode: PersonaPhotoGenerationMode) {
+    if (mode === selectedMode) return;
+    const settings = loadAiSettings();
+    setAiSettings(settings);
+    setSelectedMode(mode);
+    setSelectedModelKey(settings.modeModels[mode]);
+    setResult(null);
+    setError('');
+    setMessage('');
+  }
+
+  function changeModel(modelKey: AiImageModelKey) {
+    if (modelKey === selectedModelKey) return;
+    setSelectedModelKey(modelKey);
     setResult(null);
     setError('');
     setMessage('');
@@ -278,15 +285,16 @@ export function PersonaPhotoGenerator() {
       </SectionCard>
 
       <SectionCard
-        description="Выберите модель генерации. Качество используется по умолчанию для канонических кадров. Токен не записывается в Supabase, GitHub или persistent store."
-        title="Cloudflare Workers AI"
+        description="Режим выбирает назначенную в /admin модель. Ниже можно вручную выбрать любую модель registry - provider и prompt adapter переключатся автоматически."
+        title="AI модель"
       >
         <div>
-          <FieldLabel>Модель генерации</FieldLabel>
+          <FieldLabel>Режим генерации</FieldLabel>
           <div className="grid gap-2 sm:grid-cols-3">
-            {PERSONA_PHOTO_MODEL_PRESETS.map((preset) => {
-              const config = PERSONA_PHOTO_MODELS[preset];
-              const active = selectedModelPreset === preset;
+            {GENERATION_MODES.map((mode) => {
+              const meta = GENERATION_MODE_META[mode];
+              const mappedModel = AI_IMAGE_MODELS[aiSettings.modeModels[mode]];
+              const active = selectedMode === mode;
               return (
                 <button
                   aria-pressed={active}
@@ -295,13 +303,13 @@ export function PersonaPhotoGenerator() {
                     active ? 'border-primary/60 bg-primary-soft' : 'border-border bg-input hover:bg-surface-strong',
                   )}
                   disabled={anyBusy}
-                  key={preset}
-                  onClick={() => changeModelPreset(preset)}
+                  key={mode}
+                  onClick={() => changeGenerationMode(mode)}
                   type="button"
                 >
-                  <div className="text-sm font-semibold text-foreground">{config.label}</div>
-                  <div className="mt-1 text-[11px] font-medium text-primary">{config.shortDescription}</div>
-                  <div className="mt-1 text-[10px] leading-4 text-muted-foreground">{config.description}</div>
+                  <div className="text-sm font-semibold text-foreground">{meta.label}</div>
+                  <div className="mt-1 text-[11px] font-medium text-primary">{meta.shortDescription}</div>
+                  <div className="mt-1 text-[10px] leading-4 text-muted-foreground">{mappedModel.label}</div>
                 </button>
               );
             })}
@@ -309,30 +317,45 @@ export function PersonaPhotoGenerator() {
         </div>
 
         <label className="block">
-          <FieldLabel>API Token</FieldLabel>
-          <input
-            autoCapitalize="none"
-            autoComplete="off"
-            className="focus-ring min-h-12 w-full rounded-2xl border border-border bg-input px-3 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
-            onChange={(event) => {
-              const value = event.target.value;
-              setToken(value);
-              rememberCloudflareToken(value);
-              setTokenStatus('idle');
-            }}
-            placeholder="cfut_..."
-            spellCheck={false}
-            type="password"
-            value={token}
-          />
+          <FieldLabel>Конкретная модель</FieldLabel>
+          <select
+            className="focus-ring min-h-12 w-full rounded-2xl border border-border bg-input px-3 text-sm text-foreground outline-none"
+            disabled={anyBusy}
+            onChange={(event) => changeModel(event.target.value as AiImageModelKey)}
+            value={selectedModelKey}
+          >
+            {AI_IMAGE_MODEL_KEYS.map((key) => (
+              <option disabled={!aiSettings.enabledModels[key]} key={key} value={key}>
+                {AI_IMAGE_MODELS[key].label}{aiSettings.enabledModels[key] ? '' : ' · выключена'}
+              </option>
+            ))}
+          </select>
         </label>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button disabled={anyBusy || !token.trim()} onClick={() => void handleVerifyToken()} variant="secondary">
-            {busy === 'verifying' ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
-            Проверить токен
-          </Button>
-          {tokenStatus === 'active' ? <span className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400"><Check className="size-4" />Токен активен</span> : null}
+
+        <div className="grid gap-2 sm:grid-cols-4">
+          <InfoCell label="Provider" value={AI_PROVIDER_LABELS[modelConfig.provider]} />
+          <InfoCell label="Adapter" value={modelConfig.adapter} />
+          <InfoCell label="API model" value={aiSettings.modelOverrides[selectedModelKey] || modelConfig.apiModel || 'auto'} />
+          <InfoCell label="Credentials" value={providerCredentials.length ? `${providerCredentials.length} активных` : 'Не настроены'} />
         </div>
+
+        {!canGenerate ? (
+          <div className="flex items-start gap-2 rounded-2xl border border-amber-500/25 bg-amber-500/8 p-3 text-xs leading-5 text-amber-700 dark:text-amber-300">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+            <div>
+              Для выбранной модели нет готового provider connection или модель выключена. Откройте <a className="font-semibold underline underline-offset-2" href="#/admin">#/admin</a>, добавьте credentials и нажмите «Проверить пару».
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 className="size-4" />
+            Provider готов. При ошибке credential автоматически будет использован следующий активный credential этой группы.
+          </div>
+        )}
+
+        <a className="focus-ring inline-flex min-h-10 items-center gap-2 rounded-xl border border-border bg-surface px-3 text-xs font-semibold text-foreground transition hover:bg-surface-strong" href="#/admin">
+          <Settings2 className="size-4" />Настроить провайдеры и модели
+        </a>
       </SectionCard>
 
       <SectionCard description={selectedStep.description} title={`${selectedIndex + 1}. ${selectedStep.label}`}>
@@ -340,7 +363,7 @@ export function PersonaPhotoGenerator() {
           <InfoCell label="Контекст" value={selectedStep.contextLabel} />
           <InfoCell label="Референсы" value={referenceAssets.length ? referenceAssets.map((asset) => asset.role).join(', ') : 'Нет - стартовый кадр'} />
           <InfoCell label="Формат" value={`${selectedStep.width}x${selectedStep.height}`} />
-          <InfoCell label="Модель" value={`${modelConfig.label} · ${modelConfig.id.replace('@cf/black-forest-labs/', '')}`} />
+          <InfoCell label="Модель" value={modelConfig.label} />
         </div>
 
         {selectedRole !== 'face_closeup' ? (
@@ -370,7 +393,7 @@ export function PersonaPhotoGenerator() {
 
         {result && result.role === selectedRole ? (
           <div className="grid gap-2 sm:grid-cols-2">
-            <Button disabled={anyBusy} onClick={() => void handleGenerate()} variant="secondary">
+            <Button disabled={anyBusy || !canGenerate} onClick={() => void handleGenerate()} variant="secondary">
               {busy === 'generating' ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
               Перегенерировать
             </Button>
@@ -380,7 +403,7 @@ export function PersonaPhotoGenerator() {
             </Button>
           </div>
         ) : (
-          <Button className="w-full" disabled={anyBusy || !token.trim() || (!selectedUnlocked && !currentAsset)} onClick={() => void handleGenerate()} size="lg">
+          <Button className="w-full" disabled={anyBusy || !canGenerate || (!selectedUnlocked && !currentAsset)} onClick={() => void handleGenerate()} size="lg">
             {busy === 'generating' ? <Loader2 className="size-5 animate-spin" /> : <Sparkles className="size-5" />}
             {currentAsset ? 'Сгенерировать новый вариант' : 'Сгенерировать этот кадр'}
           </Button>
@@ -462,14 +485,13 @@ function assetRank(asset: PresetAsset): number {
   return status + (asset.isPrimary ? 100 : 0) - asset.sortOrder;
 }
 
-async function assetToCloudflareFile(asset: PresetAsset): Promise<File> {
+async function assetToAiFile(asset: PresetAsset): Promise<File> {
   if (!asset.publicUrl) throw new Error(`У референса ${asset.role} нет публичного URL.`);
   const response = await fetch(asset.publicUrl, { cache: 'no-store' });
   if (!response.ok) throw new Error(`Не удалось загрузить референс ${asset.role}: HTTP ${response.status}.`);
   const blob = await response.blob();
   const type = asset.mimeType || blob.type || 'image/jpeg';
-  const file = new File([blob], asset.fileName || `${asset.role}.${extensionForMime(type)}`, { type, lastModified: Date.now() });
-  return prepareCloudflareReference(file);
+  return new File([blob], asset.fileName || `${asset.role}.${extensionForMime(type)}`, { type, lastModified: Date.now() });
 }
 
 function base64ToFile(base64: string, mimeType: string, fileName: string): File {
