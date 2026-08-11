@@ -291,7 +291,10 @@ export function AdminAiPage() {
                             autoComplete="off"
                             className="min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
                             disabled={pageBusy}
-                            onChange={(event) => patchCredential(credential.id, { apiKey: event.target.value.trim(), hasApiKey: event.target.value.trim() ? true : credential.hasApiKey })}
+                            onChange={(event) => patchCredential(credential.id, {
+                              apiKey: event.target.value.trim(),
+                              hasApiKey: Boolean(event.target.value.trim()) || credential.hasApiKey === true,
+                            })}
                             placeholder={credential.hasApiKey ? 'Оставьте пустым, чтобы сохранить текущий ключ' : provider === 'cloudflare' ? 'cfut_...' : provider === 'pollinations' ? 'sk_...' : 'AI Horde key'}
                             spellCheck={false}
                             type={visible ? 'text' : 'password'}
