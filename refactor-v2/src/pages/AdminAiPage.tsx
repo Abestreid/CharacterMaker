@@ -5,11 +5,12 @@ import {
   Loader2,
   Plus,
   RotateCcw,
+  Save,
   ShieldCheck,
   Trash2,
   TriangleAlert,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, FieldLabel, PageIntro, SectionCard, cn } from '../components/ui';
 import { verifyAiCredential } from '../features/ai-generation/ai-image.client';
 import {
@@ -24,45 +25,90 @@ import {
 import {
   createAiCredential,
   loadAiSettings,
-  resetAiSettings,
   saveAiSettings,
   type AiCredential,
   type AiSettings,
 } from '../features/ai-generation/ai-settings';
+import {
+  fetchServerAiSettings,
+  resetServerAiSettings,
+  saveServerAiSettings,
+} from '../features/ai-generation/ai-settings.server';
 
 const PROVIDERS: AiProviderId[] = ['cloudflare', 'aihorde', 'pollinations'];
 const MODES: PersonaPhotoGenerationMode[] = ['fast', 'quality', 'experimental'];
 
 type VerifyState = { status: 'idle' | 'busy' | 'ok' | 'error'; message: string };
+type PageBusy = 'idle' | 'loading' | 'saving' | 'resetting';
 
 export function AdminAiPage() {
   const [settings, setSettings] = useState<AiSettings>(() => loadAiSettings());
   const [verifyState, setVerifyState] = useState<Record<string, VerifyState>>({});
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState<PageBusy>('loading');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
 
-  function persist(next: AiSettings) {
-    setSettings(saveAiSettings(next));
+  useEffect(() => {
+    let cancelled = false;
+    setBusy('loading');
+    void fetchServerAiSettings()
+      .then((serverSettings) => {
+        if (cancelled) return;
+        const cached = saveAiSettings(serverSettings);
+        setSettings(cached);
+        setError('');
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(errorMessage(reason));
+      })
+      .finally(() => {
+        if (!cancelled) setBusy('idle');
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  function patch(next: AiSettings) {
+    setSettings(next);
+    setMessage('Есть несохраненные изменения.');
   }
 
   function addCredential(provider: AiProviderId) {
-    persist({ ...settings, credentials: [...settings.credentials, createAiCredential(provider)] });
+    patch({ ...settings, credentials: [...settings.credentials, createAiCredential(provider)] });
   }
 
-  function patchCredential(id: string, patch: Partial<AiCredential>) {
-    persist({
+  function patchCredential(id: string, credentialPatch: Partial<AiCredential>) {
+    patch({
       ...settings,
-      credentials: settings.credentials.map((credential) => credential.id === id ? { ...credential, ...patch } : credential),
+      credentials: settings.credentials.map((credential) => credential.id === id
+        ? { ...credential, ...credentialPatch }
+        : credential),
     });
     setVerifyState((current) => ({ ...current, [id]: { status: 'idle', message: '' } }));
   }
 
   function removeCredential(id: string) {
-    persist({ ...settings, credentials: settings.credentials.filter((credential) => credential.id !== id) });
+    patch({ ...settings, credentials: settings.credentials.filter((credential) => credential.id !== id) });
     setVerifyState((current) => {
       const next = { ...current };
       delete next[id];
       return next;
     });
+  }
+
+  async function saveAll() {
+    setBusy('saving');
+    setError('');
+    setMessage('');
+    try {
+      const saved = await saveServerAiSettings(settings);
+      setSettings(saveAiSettings(saved));
+      setMessage('AI настройки сохранены на сервере. Ключи будут использоваться автоматически.');
+    } catch (reason: unknown) {
+      setError(errorMessage(reason));
+    } finally {
+      setBusy('idle');
+    }
   }
 
   async function verify(credential: AiCredential) {
@@ -77,35 +123,58 @@ export function AdminAiPage() {
     } catch (reason: unknown) {
       setVerifyState((current) => ({
         ...current,
-        [credential.id]: { status: 'error', message: reason instanceof Error ? reason.message : 'Ошибка проверки.' },
+        [credential.id]: { status: 'error', message: errorMessage(reason) },
       }));
     }
   }
 
-  function reset() {
-    if (!window.confirm('Сбросить все локальные AI credentials, model overrides и привязки режимов?')) return;
-    setSettings(resetAiSettings());
-    setVerifyState({});
-    setVisibleKeys({});
+  async function reset() {
+    if (!window.confirm('Сбросить серверные AI credentials, model overrides и привязки режимов?')) return;
+    setBusy('resetting');
+    setError('');
+    setMessage('');
+    try {
+      const next = await resetServerAiSettings();
+      setSettings(saveAiSettings(next));
+      setVerifyState({});
+      setVisibleKeys({});
+      setMessage('AI настройки сброшены к базовой конфигурации.');
+    } catch (reason: unknown) {
+      setError(errorMessage(reason));
+    } finally {
+      setBusy('idle');
+    }
   }
+
+  const pageBusy = busy !== 'idle';
 
   return (
     <div>
       <PageIntro
-        description="Единая конфигурация AI provider layer. Нормализатор Персоны остается общим, а выбранная модель автоматически определяет provider, transport и model-specific prompt adapter."
+        description="Единая серверная конфигурация AI provider layer. Нормализатор Персоны остается общим, а выбранная модель автоматически определяет provider, transport и model-specific prompt adapter."
         eyebrow="Admin"
         title="AI провайдеры и модели"
       />
 
       <div className="space-y-3 sm:space-y-4">
         <SectionCard
-          description="Настройки и ключи сохраняются только в localStorage этого браузера. Они не записываются в GitHub или Supabase. Для публичного production позже нужен серверный secrets store и авторизация admin."
-          title="Безопасность конфигурации"
+          description="API keys хранятся на сервере InfinityFree и не возвращаются обратно в браузер. После сохранения генератор использует их автоматически."
+          title="Серверная AI конфигурация"
         >
-          <div className="rounded-2xl border border-amber-500/25 bg-amber-500/8 p-3 text-xs leading-5 text-amber-700 dark:text-amber-300">
-            Не добавляйте реальные API keys в исходники. Эта страница предназначена для DEV и локального управления credentials. Cloudflare credential всегда хранится как пара Account ID + Token.
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/8 p-3 text-xs leading-5 text-emerald-700 dark:text-emerald-300">
+            Введите ключ один раз и нажмите «Сохранить на сервере». После этого поле будет пустым с отметкой «ключ сохранен» - это нормально, секрет не раскрывается клиенту.
           </div>
-          <Button onClick={reset} variant="secondary"><RotateCcw className="size-4" />Сбросить AI настройки</Button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button disabled={pageBusy} onClick={() => void saveAll()}>
+              {busy === 'saving' ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+              Сохранить на сервере
+            </Button>
+            <Button disabled={pageBusy} onClick={() => void reset()} variant="secondary">
+              {busy === 'resetting' ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
+              Сбросить AI настройки
+            </Button>
+          </div>
+          {busy === 'loading' ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-4 animate-spin" />Загрузка серверной конфигурации...</div> : null}
         </SectionCard>
 
         <SectionCard
@@ -121,7 +190,8 @@ export function AdminAiPage() {
                   <div className="mb-2 text-[11px] text-muted-foreground">{meta.shortDescription}</div>
                   <select
                     className="focus-ring min-h-11 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground outline-none"
-                    onChange={(event) => persist({ ...settings, modeModels: { ...settings.modeModels, [mode]: event.target.value as AiImageModelKey } })}
+                    disabled={pageBusy}
+                    onChange={(event) => patch({ ...settings, modeModels: { ...settings.modeModels, [mode]: event.target.value as AiImageModelKey } })}
                     value={settings.modeModels[mode]}
                   >
                     {AI_IMAGE_MODEL_KEYS.map((key) => <option key={key} value={key}>{AI_IMAGE_MODELS[key].label}</option>)}
@@ -133,7 +203,7 @@ export function AdminAiPage() {
         </SectionCard>
 
         <SectionCard
-          description="Registry задает provider и adapter. API model ID можно переопределить без изменения кода, если провайдер переименовал модель или для AI Horde нужно указать конкретную активную модель."
+          description="Registry задает provider и adapter. API model ID можно переопределить без изменения кода."
           title="Model registry"
         >
           <div className="space-y-2">
@@ -151,7 +221,8 @@ export function AdminAiPage() {
                     <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
                       <input
                         checked={settings.enabledModels[key]}
-                        onChange={(event) => persist({ ...settings, enabledModels: { ...settings.enabledModels, [key]: event.target.checked } })}
+                        disabled={pageBusy}
+                        onChange={(event) => patch({ ...settings, enabledModels: { ...settings.enabledModels, [key]: event.target.checked } })}
                         type="checkbox"
                       />
                       Включена
@@ -161,7 +232,8 @@ export function AdminAiPage() {
                     <FieldLabel>API model override</FieldLabel>
                     <input
                       className="focus-ring min-h-11 w-full rounded-xl border border-border bg-background px-3 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
-                      onChange={(event) => persist({ ...settings, modelOverrides: { ...settings.modelOverrides, [key]: event.target.value } })}
+                      disabled={pageBusy}
+                      onChange={(event) => patch({ ...settings, modelOverrides: { ...settings.modelOverrides, [key]: event.target.value } })}
                       placeholder={model.apiModel || 'Пусто = provider auto model'}
                       value={override}
                     />
@@ -184,52 +256,57 @@ export function AdminAiPage() {
                 {credentials.map((credential) => {
                   const status = verifyState[credential.id] ?? { status: 'idle', message: '' };
                   const visible = Boolean(visibleKeys[credential.id]);
+                  const keyAvailable = credential.apiKey.trim() !== '' || credential.hasApiKey === true;
                   return (
                     <div className="rounded-2xl border border-border bg-input p-3" key={credential.id}>
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <input checked={credential.enabled} onChange={(event) => patchCredential(credential.id, { enabled: event.target.checked })} type="checkbox" />
+                          <input checked={credential.enabled} disabled={pageBusy} onChange={(event) => patchCredential(credential.id, { enabled: event.target.checked })} type="checkbox" />
                           Использовать в fallback pool
                         </label>
-                        <button className="focus-ring grid size-9 place-items-center rounded-xl text-danger hover:bg-danger/10" onClick={() => removeCredential(credential.id)} type="button"><Trash2 className="size-4" /></button>
+                        <button className="focus-ring grid size-9 place-items-center rounded-xl text-danger hover:bg-danger/10" disabled={pageBusy} onClick={() => removeCredential(credential.id)} type="button"><Trash2 className="size-4" /></button>
                       </div>
 
                       <div className={cn('grid gap-3', provider === 'cloudflare' ? 'lg:grid-cols-2' : '')}>
                         <label className="block">
                           <FieldLabel>Название</FieldLabel>
-                          <input className="focus-ring min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none" onChange={(event) => patchCredential(credential.id, { label: event.target.value })} value={credential.label} />
+                          <input className="focus-ring min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none" disabled={pageBusy} onChange={(event) => patchCredential(credential.id, { label: event.target.value })} value={credential.label} />
                         </label>
                         {provider === 'cloudflare' ? (
                           <label className="block">
                             <FieldLabel>Account ID</FieldLabel>
-                            <input autoCapitalize="none" className="focus-ring min-h-11 w-full rounded-xl border border-border bg-background px-3 font-mono text-xs text-foreground outline-none" onChange={(event) => patchCredential(credential.id, { accountId: event.target.value.trim() })} placeholder="32 символа" spellCheck={false} value={credential.accountId} />
+                            <input autoCapitalize="none" className="focus-ring min-h-11 w-full rounded-xl border border-border bg-background px-3 font-mono text-xs text-foreground outline-none" disabled={pageBusy} onChange={(event) => patchCredential(credential.id, { accountId: event.target.value.trim() })} placeholder="32 символа" spellCheck={false} value={credential.accountId} />
                           </label>
                         ) : null}
                       </div>
 
                       <label className="mt-3 block">
-                        <FieldLabel>{provider === 'cloudflare' ? 'API Token' : 'API key'}</FieldLabel>
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <FieldLabel>{provider === 'cloudflare' ? 'API Token' : 'API key'}</FieldLabel>
+                          {credential.hasApiKey && !credential.apiKey ? <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Ключ сохранен на сервере</span> : null}
+                        </div>
                         <div className="focus-within:ring-2 focus-within:ring-ring/70 flex min-h-11 items-center rounded-xl border border-border bg-background px-3">
                           <input
                             autoCapitalize="none"
                             autoComplete="off"
-                            className="min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none"
-                            onChange={(event) => patchCredential(credential.id, { apiKey: event.target.value.trim() })}
-                            placeholder={provider === 'cloudflare' ? 'cfut_...' : provider === 'pollinations' ? 'sk_...' : 'AI Horde key'}
+                            className="min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
+                            disabled={pageBusy}
+                            onChange={(event) => patchCredential(credential.id, { apiKey: event.target.value.trim(), hasApiKey: event.target.value.trim() ? true : credential.hasApiKey })}
+                            placeholder={credential.hasApiKey ? 'Оставьте пустым, чтобы сохранить текущий ключ' : provider === 'cloudflare' ? 'cfut_...' : provider === 'pollinations' ? 'sk_...' : 'AI Horde key'}
                             spellCheck={false}
                             type={visible ? 'text' : 'password'}
                             value={credential.apiKey}
                           />
-                          <button className="focus-ring ml-2 grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-surface-strong" onClick={() => setVisibleKeys((current) => ({ ...current, [credential.id]: !visible }))} type="button">
+                          <button className="focus-ring ml-2 grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-surface-strong" disabled={pageBusy} onClick={() => setVisibleKeys((current) => ({ ...current, [credential.id]: !visible }))} type="button">
                             {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                           </button>
                         </div>
                       </label>
 
                       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <Button disabled={!credential.apiKey.trim() || status.status === 'busy' || (provider === 'cloudflare' && !credential.accountId.trim())} onClick={() => void verify(credential)} size="sm" variant="secondary">
+                        <Button disabled={!keyAvailable || status.status === 'busy' || pageBusy || (provider === 'cloudflare' && !credential.accountId.trim())} onClick={() => void verify(credential)} size="sm" variant="secondary">
                           {status.status === 'busy' ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
-                          Проверить пару
+                          Проверить credential
                         </Button>
                         {status.message ? <CredentialStatus state={status} /> : null}
                       </div>
@@ -238,10 +315,13 @@ export function AdminAiPage() {
                 })}
               </div>
 
-              <Button onClick={() => addCredential(provider)} variant="secondary"><Plus className="size-4" />Добавить credential</Button>
+              <Button disabled={pageBusy} onClick={() => addCredential(provider)} variant="secondary"><Plus className="size-4" />Добавить credential</Button>
             </SectionCard>
           );
         })}
+
+        {message ? <div className="flex items-start gap-2 rounded-2xl border border-emerald-500/20 bg-emerald-500/8 p-3 text-xs leading-5 text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="mt-0.5 size-4 shrink-0" />{message}</div> : null}
+        {error ? <div className="flex items-start gap-2 rounded-2xl border border-danger/25 bg-danger/8 p-3 text-xs leading-5 text-danger"><TriangleAlert className="mt-0.5 size-4 shrink-0" />{error}</div> : null}
       </div>
     </div>
   );
@@ -259,13 +339,17 @@ function CredentialStatus({ state }: { state: VerifyState }) {
 }
 
 function providerDescription(provider: AiProviderId): string {
-  if (provider === 'cloudflare') return 'Добавляйте пары Account ID + API Token. Порядок карточек является порядком перебора: при ошибке первого credential клиент пробует следующий.';
-  if (provider === 'aihorde') return 'AI Horde использует API key. Для anonymous режима допустим ключ 0000000000, но очередь будет с минимальным приоритетом.';
-  return 'Pollinations использует server-side sk_ API key. Проверка читает account balance, генерация идет через OpenAI-compatible image endpoint.';
+  if (provider === 'cloudflare') return 'Пары Account ID + API Token сохраняются на сервере. Порядок карточек является порядком fallback: при ошибке первого credential клиент пробует следующий.';
+  if (provider === 'aihorde') return 'AI Horde API key сохраняется на сервере. Для anonymous режима допустим ключ 0000000000, но очередь будет с минимальным приоритетом.';
+  return 'Pollinations sk_ key сохраняется на сервере. Генерация идет через image API, секрет не возвращается в браузер.';
 }
 
 function detailText(details: Record<string, unknown>): string {
   const entries = Object.entries(details).filter(([, value]) => value !== null && value !== undefined && value !== '');
   if (!entries.length) return '';
   return ` · ${entries.map(([key, value]) => `${key}: ${String(value)}`).join(' · ')}`;
+}
+
+function errorMessage(reason: unknown): string {
+  return reason instanceof Error ? reason.message : 'Неизвестная ошибка AI settings.';
 }
