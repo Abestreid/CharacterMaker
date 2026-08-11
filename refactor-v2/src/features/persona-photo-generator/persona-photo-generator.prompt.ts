@@ -1,4 +1,5 @@
 import type { CharacterState } from '../../domain';
+import type { PersonaPhotoAdapterId } from '../ai-generation/ai-registry';
 import { buildFlux2DevPersonaPhotoPrompt } from '../cloudflare-ai/flux2-dev.persona-adapter';
 import {
   FLUX2_KLEIN_CANONICAL_OUTFIT,
@@ -28,14 +29,14 @@ export const CHARACTER_PHOTO_STEPS = [
 
 export const DEFAULT_CANONICAL_OUTFIT = FLUX2_KLEIN_CANONICAL_OUTFIT;
 
-export function buildCharacterPhotoPrompt(input: {
+export function buildCharacterPhotoPromptForAdapter(input: {
   character: CharacterState;
   role: CharacterPhotoRole;
-  modelPreset: PersonaPhotoModelPreset;
+  adapter: PersonaPhotoAdapterId;
   personaName?: string | null;
   referenceRoles?: readonly string[];
 }): string {
-  if (input.modelPreset === 'experimental') {
+  if (input.adapter === 'flux2-dev') {
     return buildFlux2DevPersonaPhotoPrompt({
       character: input.character,
       role: input.role,
@@ -43,9 +44,35 @@ export function buildCharacterPhotoPrompt(input: {
     });
   }
 
-  return buildFlux2KleinPersonaPhotoPrompt({
+  const base = buildFlux2KleinPersonaPhotoPrompt({
     character: input.character,
     role: input.role,
+    ...(input.referenceRoles ? { referenceRoles: input.referenceRoles } : {}),
+  });
+
+  if (input.adapter === 'aihorde-sd') {
+    return `${base}\n\nAI Horde Stable Diffusion adapter: prioritize photorealistic human anatomy, identity consistency, exact saved silhouette and clean neutral studio photography. Treat the first supplied source image as the strongest identity reference when one is present.`;
+  }
+
+  if (input.adapter === 'pollinations-klein') {
+    return `${base}\n\nPollinations image adapter: preserve identity and exact BodyDNA geometry from the prompt and supplied reference images; prefer a realistic photographic result over stylization.`;
+  }
+
+  return base;
+}
+
+export function buildCharacterPhotoPrompt(input: {
+  character: CharacterState;
+  role: CharacterPhotoRole;
+  modelPreset: PersonaPhotoModelPreset;
+  personaName?: string | null;
+  referenceRoles?: readonly string[];
+}): string {
+  return buildCharacterPhotoPromptForAdapter({
+    character: input.character,
+    role: input.role,
+    adapter: input.modelPreset === 'experimental' ? 'flux2-dev' : 'flux2-klein',
+    ...(input.personaName !== undefined ? { personaName: input.personaName } : {}),
     ...(input.referenceRoles ? { referenceRoles: input.referenceRoles } : {}),
   });
 }
