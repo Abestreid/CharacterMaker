@@ -5,13 +5,13 @@ import {
   ImagePlus,
   Loader2,
   Save,
-  Settings2,
   Sparkles,
   TriangleAlert,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, FieldLabel, SectionCard, cn } from '../../components/ui';
 import { characterMakerService } from '../../core/character-maker.service';
+import { fetchPublicCatalogs } from '../../infrastructure/supabase/catalog.repository';
 import type { PresetAsset } from '../../infrastructure/supabase/preset-assets.repository';
 import { useEditorStore } from '../../store/editor-store';
 import { generateAiImage } from '../ai-generation/ai-image.client';
@@ -19,10 +19,10 @@ import {
   AI_IMAGE_MODELS,
   AI_IMAGE_MODEL_KEYS,
   AI_PROVIDER_LABELS,
-  GENERATION_MODE_META,
   type AiImageModelKey,
-  type PersonaPhotoGenerationMode,
+  type AiProviderId,
 } from '../ai-generation/ai-registry';
+import { fetchServerAiSettings } from '../ai-generation/ai-settings.server';
 import {
   getEnabledCredentials,
   loadAiSettings,
@@ -43,8 +43,9 @@ type GeneratedPhoto = {
   mimeType: string;
 };
 
-const GENERATION_MODES = ['fast', 'quality', 'experimental'] as const satisfies readonly PersonaPhotoGenerationMode[];
-const DEFAULT_GENERATION_MODE: PersonaPhotoGenerationMode = 'quality';
+const FALLBACK_PROVIDERS: readonly AiProviderId[] = ['cloudflare', 'pollinations', 'aihorde'];
+const DEFAULT_PROVIDER: AiProviderId = 'cloudflare';
+const DEFAULT_MODEL: AiImageModelKey = 'cloudflare-flux-2-klein-9b';
 
 export function PersonaPhotoGenerator() {
   const character = useEditorStore((state) => state.character);
@@ -53,8 +54,10 @@ export function PersonaPhotoGenerator() {
   const [personaName, setPersonaName] = useState('Персона');
   const [selectedRole, setSelectedRole] = useState<CharacterPhotoRole>('face_closeup');
   const [aiSettings, setAiSettings] = useState<AiSettings>(() => loadAiSettings());
-  const [selectedMode, setSelectedMode] = useState<PersonaPhotoGenerationMode>(DEFAULT_GENERATION_MODE);
-  const [selectedModelKey, setSelectedModelKey] = useState<AiImageModelKey>(() => loadAiSettings().modeModels[DEFAULT_GENERATION_MODE]);
+  const [providerOrder, setProviderOrder] = useState<AiProviderId[]>([...FALLBACK_PROVIDERS]);
+  const [modelOrder, setModelOrder] = useState<AiImageModelKey[]>([...AI_IMAGE_MODEL_KEYS]);
+  const [selectedProvider, setSelectedProvider] = useState<AiProviderId>(DEFAULT_PROVIDER);
+  const [selectedModelKey, setSelectedModelKey] = useState<AiImageModelKey>(DEFAULT_MODEL);
   const [result, setResult] = useState<GeneratedPhoto | null>(null);
   const [busy, setBusy] = useState<'idle' | 'loading' | 'generating' | 'saving'>('idle');
   const [message, setMessage] = useState('');
@@ -86,20 +89,39 @@ export function PersonaPhotoGenerator() {
   }, [activeCharacterId, refresh]);
 
   useEffect(() => {
-    const reload = () => setAiSettings(loadAiSettings());
-    window.addEventListener('charactermaker:ai-settings-changed', reload);
-    window.addEventListener('storage', reload);
-    return () => {
-      window.removeEventListener('charactermaker:ai-settings-changed', reload);
-      window.removeEventListener('storage', reload);
-    };
+    let cancelled = false;
+    void Promise.allSettled([fetchServerAiSettings(), fetchPublicCatalogs()]).then((results) => {
+      if (cancelled) return;
+      const settingsResult = results[0];
+      if (settingsResult.status === 'fulfilled') setAiSettings(settingsResult.value);
+
+      const catalogsResult = results[1];
+      if (catalogsResult.status === 'fulfilled') {
+        const providerCatalog = catalogsResult.value.find((catalog) => catalog.key === 'ai_provider');
+        const modelCatalog = catalogsResult.value.find((catalog) => catalog.key === 'ai_model');
+
+        const providers = (providerCatalog?.options ?? [])
+          .map((option) => option.value || option.id)
+          .filter(isAiProviderId);
+        if (providers.length) setProviderOrder(providers);
+
+        const models = (modelCatalog?.options ?? [])
+          .map((option) => option.value || option.id)
+          .filter(isAiImageModelKey);
+        if (models.length) setModelOrder(models);
+      }
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const selectedStep = CHARACTER_PHOTO_STEPS.find((step) => step.role === selectedRole) ?? CHARACTER_PHOTO_STEPS[0];
   const selectedIndex = CHARACTER_PHOTO_STEPS.findIndex((step) => step.role === selectedRole);
   const referenceAssets = useMemo(() => selectReferenceAssets(assets, selectedRole), [assets, selectedRole]);
   const modelConfig = AI_IMAGE_MODELS[selectedModelKey];
-  const providerCredentials = getEnabledCredentials(modelConfig.provider, aiSettings);
+  const providerCredentials = getEnabledCredentials(selectedProvider, aiSettings);
+  const availableModels = useMemo(() => modelOrder.filter((key) => (
+    AI_IMAGE_MODELS[key].provider === selectedProvider && aiSettings.enabledModels[key]
+  )), [aiSettings.enabledModels, modelOrder, selectedProvider]);
   const prompt = useMemo(() => buildCharacterPhotoPromptForAdapter({
     character,
     role: selectedRole,
@@ -110,35 +132,36 @@ export function PersonaPhotoGenerator() {
   const currentAsset = useMemo(() => bestAssetForRole(assets, selectedRole), [assets, selectedRole]);
   const selectedUnlocked = isStepUnlocked(selectedRole, assets);
   const anyBusy = busy !== 'idle';
-  const canGenerate = providerCredentials.length > 0 && aiSettings.enabledModels[selectedModelKey];
+  const canGenerate = providerCredentials.length > 0
+    && aiSettings.enabledModels[selectedModelKey]
+    && modelConfig.provider === selectedProvider;
+
+  useEffect(() => {
+    if (modelConfig.provider === selectedProvider && availableModels.includes(selectedModelKey)) return;
+    const nextModel = availableModels[0];
+    if (nextModel) setSelectedModelKey(nextModel);
+  }, [availableModels, modelConfig.provider, selectedModelKey, selectedProvider]);
 
   async function handleGenerate() {
     if (!activeCharacterId) {
-      setError('Сначала сохраните или загрузите Персону как пресет. Канонические фото должны иметь character_id в Supabase.');
+      setError('Сначала сохраните или загрузите Персону как пресет.');
       return;
     }
     if (!selectedUnlocked && !currentAsset) {
-      setError('Сначала завершите предыдущие канонические кадры. Генератор намеренно работает по очереди.');
+      setError('Сначала завершите предыдущие канонические кадры.');
       return;
     }
 
-    const freshSettings = loadAiSettings();
-    const freshCredentials = getEnabledCredentials(modelConfig.provider, freshSettings);
-    if (!freshSettings.enabledModels[selectedModelKey]) {
-      setError(`Модель «${modelConfig.label}» выключена. Включите ее в /admin или выберите другую модель.`);
-      return;
-    }
-    if (!freshCredentials.length) {
-      setError(`Для ${AI_PROVIDER_LABELS[modelConfig.provider]} нет активных credentials. Добавьте и проверьте их в /admin.`);
-      return;
-    }
-
-    setAiSettings(freshSettings);
     setBusy('generating');
     setError('');
     setMessage('');
     setResult(null);
     try {
+      const freshSettings = await fetchServerAiSettings();
+      setAiSettings(freshSettings);
+      if (!freshSettings.enabledModels[selectedModelKey]) throw new Error('Выбранная модель сейчас выключена.');
+      if (!getEnabledCredentials(selectedProvider, freshSettings).length) throw new Error('Выбранный сервис сейчас недоступен.');
+
       const references = await Promise.all(referenceAssets.map(assetToAiFile));
       const response = await generateAiImage({
         modelKey: selectedModelKey,
@@ -161,9 +184,9 @@ export function PersonaPhotoGenerator() {
         height: response.height,
         mimeType: response.mimeType,
       });
-      setMessage(`Кадр сгенерирован: ${modelConfig.label}. Credential: ${response.credentialLabel}. Проверьте результат и сохраните как канон или перегенерируйте.`);
+      setMessage(`Кадр сгенерирован моделью «${modelConfig.label.replace(/^.* · /, '')}». Проверьте результат и сохраните как канон или перегенерируйте.`);
     } catch (reason: unknown) {
-      setError(errorMessage(reason));
+      setError(friendlyGenerationError(reason));
     } finally {
       setBusy('idle');
     }
@@ -197,9 +220,9 @@ export function PersonaPhotoGenerator() {
       const next = CHARACTER_PHOTO_STEPS[selectedIndex + 1];
       if (next) setSelectedRole(next.role);
       setMessage(cleanupFailures
-        ? 'Новый канон сохранен. Часть старых файлов не удалось удалить автоматически - проверьте слот в менеджере пресета.'
+        ? 'Новый канон сохранен. Часть старых файлов не удалось удалить автоматически.'
         : next
-          ? `Канон сохранен. Переходим к следующему шагу: ${next.label}.`
+          ? `Канон сохранен. Следующий шаг: ${next.label}.`
           : 'Пятый канонический кадр сохранен. Базовый комплект Персоны завершен.');
     } catch (reason: unknown) {
       setError(errorMessage(reason));
@@ -216,12 +239,13 @@ export function PersonaPhotoGenerator() {
     setMessage('');
   }
 
-  function changeGenerationMode(mode: PersonaPhotoGenerationMode) {
-    if (mode === selectedMode) return;
-    const settings = loadAiSettings();
-    setAiSettings(settings);
-    setSelectedMode(mode);
-    setSelectedModelKey(settings.modeModels[mode]);
+  function changeProvider(provider: AiProviderId) {
+    if (provider === selectedProvider) return;
+    setSelectedProvider(provider);
+    const firstModel = modelOrder.find((key) => (
+      AI_IMAGE_MODELS[key].provider === provider && aiSettings.enabledModels[key]
+    ));
+    if (firstModel) setSelectedModelKey(firstModel);
     setResult(null);
     setError('');
     setMessage('');
@@ -238,11 +262,11 @@ export function PersonaPhotoGenerator() {
   if (!activeCharacterId) {
     return (
       <SectionCard
-        description="Фото являются assets сохраненной Персоны и должны иметь постоянный character_id. Это предотвращает сиротские файлы и дубли в Supabase."
+        description="Фото являются частью сохраненной Персоны."
         title="Канонические фото"
       >
         <div className="rounded-2xl border border-dashed border-border bg-input/40 p-5 text-sm leading-6 text-muted-foreground">
-          Сначала сохраните текущие параметры через верхнюю панель «Сохранить как пресет» или загрузите существующую Персону. После этого здесь появится пошаговая генерация пяти канонических фотографий.
+          Сначала сохраните текущую Персону или загрузите существующую. После этого здесь появится пошаговая генерация пяти канонических фотографий.
         </div>
       </SectionCard>
     );
@@ -251,7 +275,7 @@ export function PersonaPhotoGenerator() {
   return (
     <div className="space-y-3 sm:space-y-4">
       <SectionCard
-        description="Пять кадров создаются последовательно. Каждый сохраненный канон становится референсом для следующих шагов, поэтому лицо и пропорции стабилизируются по мере прохождения мастера."
+        description="Пять кадров создаются последовательно. Каждый сохраненный канон становится референсом для следующих шагов."
         title={`Канонические фото · ${personaName}`}
       >
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
@@ -284,78 +308,48 @@ export function PersonaPhotoGenerator() {
         </div>
       </SectionCard>
 
-      <SectionCard
-        description="Режим выбирает назначенную в /admin модель. Ниже можно вручную выбрать любую модель registry - provider и prompt adapter переключатся автоматически."
-        title="AI модель"
-      >
-        <div>
-          <FieldLabel>Режим генерации</FieldLabel>
-          <div className="grid gap-2 sm:grid-cols-3">
-            {GENERATION_MODES.map((mode) => {
-              const meta = GENERATION_MODE_META[mode];
-              const mappedModel = AI_IMAGE_MODELS[aiSettings.modeModels[mode]];
-              const active = selectedMode === mode;
-              return (
-                <button
-                  aria-pressed={active}
-                  className={cn(
-                    'focus-ring min-h-20 rounded-2xl border p-3 text-left transition',
-                    active ? 'border-primary/60 bg-primary-soft' : 'border-border bg-input hover:bg-surface-strong',
-                  )}
-                  disabled={anyBusy}
-                  key={mode}
-                  onClick={() => changeGenerationMode(mode)}
-                  type="button"
-                >
-                  <div className="text-sm font-semibold text-foreground">{meta.label}</div>
-                  <div className="mt-1 text-[11px] font-medium text-primary">{meta.shortDescription}</div>
-                  <div className="mt-1 text-[10px] leading-4 text-muted-foreground">{mappedModel.label}</div>
-                </button>
-              );
-            })}
-          </div>
+      <SectionCard description="Выберите сервис генерации, затем доступную модель." title="Генерация фото">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <FieldLabel>Провайдер</FieldLabel>
+            <select
+              className="focus-ring min-h-12 w-full rounded-2xl border border-border bg-input px-3 text-sm text-foreground outline-none"
+              disabled={anyBusy}
+              onChange={(event) => changeProvider(event.target.value as AiProviderId)}
+              value={selectedProvider}
+            >
+              {providerOrder.map((provider) => (
+                <option key={provider} value={provider}>{AI_PROVIDER_LABELS[provider]}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <FieldLabel>Модель</FieldLabel>
+            <select
+              className="focus-ring min-h-12 w-full rounded-2xl border border-border bg-input px-3 text-sm text-foreground outline-none"
+              disabled={anyBusy || availableModels.length === 0}
+              onChange={(event) => changeModel(event.target.value as AiImageModelKey)}
+              value={selectedModelKey}
+            >
+              {availableModels.map((key) => (
+                <option key={key} value={key}>{AI_IMAGE_MODELS[key].label.replace(/^.* · /, '')}</option>
+              ))}
+            </select>
+          </label>
         </div>
 
-        <label className="block">
-          <FieldLabel>Конкретная модель</FieldLabel>
-          <select
-            className="focus-ring min-h-12 w-full rounded-2xl border border-border bg-input px-3 text-sm text-foreground outline-none"
-            disabled={anyBusy}
-            onChange={(event) => changeModel(event.target.value as AiImageModelKey)}
-            value={selectedModelKey}
-          >
-            {AI_IMAGE_MODEL_KEYS.map((key) => (
-              <option disabled={!aiSettings.enabledModels[key]} key={key} value={key}>
-                {AI_IMAGE_MODELS[key].label}{aiSettings.enabledModels[key] ? '' : ' · выключена'}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="grid gap-2 sm:grid-cols-4">
-          <InfoCell label="Provider" value={AI_PROVIDER_LABELS[modelConfig.provider]} />
-          <InfoCell label="Adapter" value={modelConfig.adapter} />
-          <InfoCell label="API model" value={aiSettings.modelOverrides[selectedModelKey] || modelConfig.apiModel || 'auto'} />
-          <InfoCell label="Credentials" value={providerCredentials.length ? `${providerCredentials.length} активных` : 'Не настроены'} />
-        </div>
-
-        {!canGenerate ? (
-          <div className="flex items-start gap-2 rounded-2xl border border-amber-500/25 bg-amber-500/8 p-3 text-xs leading-5 text-amber-700 dark:text-amber-300">
-            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-            <div>
-              Для выбранной модели нет готового provider connection или модель выключена. Откройте <a className="font-semibold underline underline-offset-2" href="#/admin">#/admin</a>, добавьте credentials и нажмите «Проверить пару».
-            </div>
-          </div>
-        ) : (
+        {canGenerate ? (
           <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
             <CheckCircle2 className="size-4" />
-            Provider готов. При ошибке credential автоматически будет использован следующий активный credential этой группы.
+            Готово к генерации.
+          </div>
+        ) : (
+          <div className="flex items-start gap-2 rounded-2xl border border-amber-500/25 bg-amber-500/8 p-3 text-xs leading-5 text-amber-700 dark:text-amber-300">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+            Выбранный сервис сейчас недоступен. Выберите другой провайдер или модель.
           </div>
         )}
-
-        <a className="focus-ring inline-flex min-h-10 items-center gap-2 rounded-xl border border-border bg-surface px-3 text-xs font-semibold text-foreground transition hover:bg-surface-strong" href="#/admin">
-          <Settings2 className="size-4" />Настроить провайдеры и модели
-        </a>
       </SectionCard>
 
       <SectionCard description={selectedStep.description} title={`${selectedIndex + 1}. ${selectedStep.label}`}>
@@ -363,7 +357,7 @@ export function PersonaPhotoGenerator() {
           <InfoCell label="Контекст" value={selectedStep.contextLabel} />
           <InfoCell label="Референсы" value={referenceAssets.length ? referenceAssets.map((asset) => asset.role).join(', ') : 'Нет - стартовый кадр'} />
           <InfoCell label="Формат" value={`${selectedStep.width}x${selectedStep.height}`} />
-          <InfoCell label="Модель" value={modelConfig.label} />
+          <InfoCell label="Модель" value={modelConfig.label.replace(/^.* · /, '')} />
         </div>
 
         {selectedRole !== 'face_closeup' ? (
@@ -445,6 +439,14 @@ function InfoCell({ label, value }: { label: string; value: string }) {
   );
 }
 
+function isAiProviderId(value: string): value is AiProviderId {
+  return value === 'cloudflare' || value === 'pollinations' || value === 'aihorde';
+}
+
+function isAiImageModelKey(value: string): value is AiImageModelKey {
+  return AI_IMAGE_MODEL_KEYS.includes(value as AiImageModelKey);
+}
+
 function isStepUnlocked(role: CharacterPhotoRole, assets: readonly PresetAsset[]): boolean {
   const index = CHARACTER_PHOTO_STEPS.findIndex((step) => step.role === role);
   if (index <= 0) return true;
@@ -509,6 +511,17 @@ function extensionForMime(mimeType: string): string {
 
 function slugFileName(value: string): string {
   return value.toLocaleLowerCase('ru').replace(/[^a-z0-9а-яё]+/gi, '-').replace(/^-+|-+$/g, '') || 'persona';
+}
+
+function friendlyGenerationError(reason: unknown): string {
+  const message = errorMessage(reason);
+  if (message.includes('kudos_required') || /requires .*kudos|required kudos|heavy demand/i.test(message)) {
+    return 'AI Horde сейчас не может выполнить этот запрос бесплатно. Выберите другую модель или повторите позже.';
+  }
+  if (/credentials|credential|api key|authentication|unauthorized/i.test(message)) {
+    return 'Выбранный сервис временно недоступен. Выберите другой провайдер или модель.';
+  }
+  return message;
 }
 
 function errorMessage(reason: unknown): string {
