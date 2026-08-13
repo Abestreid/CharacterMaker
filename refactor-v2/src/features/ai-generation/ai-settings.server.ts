@@ -1,4 +1,4 @@
-import type { AiSettings } from './ai-settings';
+import { DEFAULT_AI_SETTINGS, type AiSettings } from './ai-settings';
 
 const API_URL = './api/ai-settings.php';
 
@@ -32,5 +32,11 @@ async function readSettings(response: Response): Promise<AiSettings> {
   if (!response.ok || !payload?.settings) {
     throw new Error(payload?.error || `AI settings API вернул HTTP ${response.status}.`);
   }
-  return payload.settings;
+
+  return {
+    ...payload.settings,
+    modeModels: { ...DEFAULT_AI_SETTINGS.modeModels, ...payload.settings.modeModels },
+    enabledModels: { ...DEFAULT_AI_SETTINGS.enabledModels, ...payload.settings.enabledModels },
+    modelOverrides: { ...DEFAULT_AI_SETTINGS.modelOverrides, ...payload.settings.modelOverrides },
+  };
 }
