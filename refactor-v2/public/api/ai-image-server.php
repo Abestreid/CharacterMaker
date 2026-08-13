@@ -20,6 +20,39 @@ if ($directKey === '' && $credentialId !== '') {
     }
 }
 
+$action = (string)($_GET['action'] ?? '');
+
+// Pollinations retired the old balance check as a reliable credential probe.
+// Verify against the current OpenAI-compatible model endpoint instead.
+if ($provider === 'pollinations' && $action === 'verify') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    $key = trim((string)($_POST['api_key'] ?? ''));
+    if ($key === '' || !function_exists('curl_init')) {
+        http_response_code(401);
+        echo json_encode(['error' => 'Pollinations API key не найден.', 'code' => 'credential_missing'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+    $curl = curl_init('https://gen.pollinations.ai/v1/models');
+    curl_setopt_array($curl, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $key, 'Accept: application/json'],
+        CURLOPT_USERAGENT => 'CharacterMaker-V2/AI-Provider-Layer',
+    ]);
+    $body = curl_exec($curl);
+    $status = (int)curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    curl_close($curl);
+    if ($status < 200 || $status >= 300 || !is_string($body)) {
+        http_response_code($status >= 400 && $status < 600 ? $status : 502);
+        echo json_encode(['error' => 'Pollinations API key отклонен.', 'code' => ($status === 401 || $status === 403) ? 'credential_invalid' : 'provider_error'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+    echo json_encode(['ok' => true, 'provider' => 'pollinations', 'message' => 'Pollinations API key активен.'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 /**
  * AI Horde allows zero-kudos image requests only inside its free request envelope.
  * CharacterMaker canonical frames are commonly 768x1024, so scale them to the
@@ -56,7 +89,6 @@ function cmAiHordeZeroKudosDimensions(int $requestedWidth, int $requestedHeight)
     return [$bestWidth, $bestHeight];
 }
 
-$action = (string)($_GET['action'] ?? '');
 if ($provider === 'aihorde' && $action === 'generate') {
     $requestedWidth = is_numeric($_POST['width'] ?? null) ? (int)$_POST['width'] : 768;
     $requestedHeight = is_numeric($_POST['height'] ?? null) ? (int)$_POST['height'] : 1024;
