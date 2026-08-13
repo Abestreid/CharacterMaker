@@ -29,6 +29,16 @@ export const CHARACTER_PHOTO_STEPS = [
 
 export const DEFAULT_CANONICAL_OUTFIT = FLUX2_KLEIN_CANONICAL_OUTFIT;
 
+const ADAPTER_SUFFIX: Partial<Record<PersonaPhotoAdapterId, string>> = {
+  'aihorde-sd': 'AI Horde adapter: keep the requested identity, proportions, framing and realistic photographic appearance consistent. Use the first source image as the primary visual reference when supplied.',
+  'pollinations-klein': 'Pollinations Klein adapter: keep identity and saved proportions consistent with all supplied references and instructions.',
+  'pollinations-gptimage': 'Pollinations GPT Image adapter: use supplied references as strict identity constraints and keep all saved physical proportions consistent.',
+  'pollinations-gptimage-large': 'Pollinations GPT Image Large adapter: prioritize high identity fidelity, stable proportions and natural photographic detail.',
+  'pollinations-kontext': 'Pollinations Kontext adapter: use reference images as primary context and preserve stable identity while changing only what the requested frame requires.',
+  'pollinations-flux': 'Pollinations Flux adapter: follow the complete normalized character description literally and keep realistic anatomy and neutral photography.',
+  'pollinations-zimage': 'Pollinations Z-Image adapter: follow the complete normalized character description literally with neutral lens perspective and realistic photography.',
+};
+
 export function buildCharacterPhotoPromptForAdapter(input: {
   character: CharacterState;
   role: CharacterPhotoRole;
@@ -49,16 +59,8 @@ export function buildCharacterPhotoPromptForAdapter(input: {
     role: input.role,
     ...(input.referenceRoles ? { referenceRoles: input.referenceRoles } : {}),
   });
-
-  if (input.adapter === 'aihorde-sd') {
-    return `${base}\n\nAI Horde Stable Diffusion adapter: prioritize photorealistic human anatomy, identity consistency, exact saved silhouette and clean neutral studio photography. Treat the first supplied source image as the strongest identity reference when one is present.`;
-  }
-
-  if (input.adapter === 'pollinations-klein') {
-    return `${base}\n\nPollinations image adapter: preserve identity and exact BodyDNA geometry from the prompt and supplied reference images; prefer a realistic photographic result over stylization.`;
-  }
-
-  return base;
+  const suffix = ADAPTER_SUFFIX[input.adapter];
+  return suffix ? `${base}\n\n${suffix}` : base;
 }
 
 export function buildCharacterPhotoPrompt(input: {
