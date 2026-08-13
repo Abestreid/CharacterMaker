@@ -41,40 +41,37 @@ jobs:
           test "$actual" = "$EXPECTED_SHA256"
           echo 'secret_exact_match=yes'
 
-      - name: Inspect account permissions and create app key
+      - name: Create temporary app key, direct generate, revoke
         run: |
           set +e
           sk=$(cat /tmp/poll.sk)
           echo "::add-mask::$sk"
-          info_code=$(curl -sS -o /tmp/key-info.json -w '%{http_code}' --max-time 40 -H "Authorization: Bearer $sk" -H 'Accept: application/json' 'https://gen.pollinations.ai/account/key')
-          echo "account_key_http=$info_code"
-          jq '{valid,type,name,permissions,pollenBudget,rateLimitEnabled}' /tmp/key-info.json 2>/dev/null || true
 
           create_code=$(curl -sS -o /tmp/create.json -w '%{http_code}' --max-time 40 -X POST \
             -H "Authorization: Bearer $sk" \
             -H 'Content-Type: application/json' \
             -H 'Accept: application/json' \
-            -d '{"name":"CharacterMaker DEV BYOP test","type":"publishable","redirectUris":["https://charmaker.free.nf/dev/"],"allowedModels":["klein","flux","zimage","gptimage","gptimage-large","kontext"],"earningsEnabled":false}' \
+            -d '{"name":"CharacterMaker DEV direct-free test","type":"publishable","redirectUris":["https://charmaker.free.nf/dev/"],"allowedModels":["klein","flux","zimage","gptimage","gptimage-large","kontext"],"earningsEnabled":false}' \
             'https://gen.pollinations.ai/account/keys')
           echo "create_pk_http=$create_code"
           pk=$(jq -r '.key // empty' /tmp/create.json 2>/dev/null)
           id=$(jq -r '.id // empty' /tmp/create.json 2>/dev/null)
-          if [ -z "$pk" ]; then
+          if [ -z "$pk" ] || [ -z "$id" ]; then
+            echo 'pk_created=no'
             jq -r '.error.message // .error // .message // "no_key_returned"' /tmp/create.json 2>/dev/null | head -c 500; echo
             exit 0
           fi
           echo "::add-mask::$pk"
-          printf '%s' "$pk" > /tmp/poll.pk
-          printf '%s' "$id" > /tmp/poll-pk-id
           echo 'pk_created=yes'
-          echo "pk_prefix=${pk:0:3}"
 
-      - name: Direct generation with publishable key without OAuth
-        if: ${{ hashFiles('/tmp/poll.pk') != '' }}
-        run: |
-          set +e
-          pk=$(cat /tmp/poll.pk)
-          echo "::add-mask::$pk"
+          info_code=$(curl -sS -o /tmp/pk-info.json -w '%{http_code}' --max-time 40 -H "Authorization: Bearer $pk" -H 'Accept: application/json' 'https://gen.pollinations.ai/account/key')
+          echo "pk_info_http=$info_code"
+          jq '{valid,type,permissions,pollenBudget,rateLimitEnabled}' /tmp/pk-info.json 2>/dev/null || true
+
+          bal_code=$(curl -sS -o /tmp/pk-balance.json -w '%{http_code}' --max-time 40 -H "Authorization: Bearer $pk" -H 'Accept: application/json' 'https://gen.pollinations.ai/account/balance')
+          echo "pk_balance_http=$bal_code"
+          jq '{balance}' /tmp/pk-balance.json 2>/dev/null || true
+
           gen_code=$(curl -sS -o /tmp/gen.json -w '%{http_code}' --max-time 120 -X POST \
             -H "Authorization: Bearer $pk" \
             -H 'Content-Type: application/json' \
@@ -89,6 +86,9 @@ jobs:
             jq -r '.error.message // .error // .message // "unknown"' /tmp/gen.json 2>/dev/null | head -c 500; echo
           fi
 
+          revoke_code=$(curl -sS -o /tmp/revoke.json -w '%{http_code}' --max-time 40 -X DELETE -H "Authorization: Bearer $sk" -H 'Accept: application/json' "https://gen.pollinations.ai/account/keys/$id")
+          echo "temporary_pk_revoke_http=$revoke_code"
+
       - name: Cleanup
         if: always()
-        run: rm -f /tmp/poll.sk /tmp/poll.pk /tmp/poll-pk-id /tmp/candidate.enc /tmp/settings.php /tmp/key-info.json /tmp/create.json /tmp/gen.json
+        run: rm -f /tmp/poll.sk /tmp/candidate.enc /tmp/settings.php /tmp/create.json /tmp/pk-info.json /tmp/pk-balance.json /tmp/gen.json /tmp/revoke.json
