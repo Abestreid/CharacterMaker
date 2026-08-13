@@ -1,6 +1,15 @@
 export type AiProviderId = 'cloudflare' | 'aihorde' | 'pollinations';
 export type PersonaPhotoGenerationMode = 'fast' | 'quality' | 'experimental';
-export type PersonaPhotoAdapterId = 'flux2-klein' | 'flux2-dev' | 'aihorde-sd' | 'pollinations-klein';
+export type PersonaPhotoAdapterId =
+  | 'flux2-klein'
+  | 'flux2-dev'
+  | 'aihorde-sd'
+  | 'pollinations-klein'
+  | 'pollinations-gptimage'
+  | 'pollinations-gptimage-large'
+  | 'pollinations-kontext'
+  | 'pollinations-flux'
+  | 'pollinations-zimage';
 
 export type AiImageModelConfig = {
   key: string;
@@ -25,7 +34,7 @@ export const AI_IMAGE_MODELS = {
     provider: 'cloudflare',
     apiModel: '@cf/black-forest-labs/flux-2-klein-4b',
     label: 'Cloudflare · FLUX.2 Klein 4B',
-    description: 'Быстрый Workers AI режим для черновиков и предварительных вариантов.',
+    description: 'Быстрый Workers AI вариант.',
     adapter: 'flux2-klein',
     maxReferences: 4,
     guidance: 1.0,
@@ -35,7 +44,7 @@ export const AI_IMAGE_MODELS = {
     provider: 'cloudflare',
     apiModel: '@cf/black-forest-labs/flux-2-klein-9b',
     label: 'Cloudflare · FLUX.2 Klein 9B',
-    description: 'Основной Workers AI режим для канонических фотографий.',
+    description: 'Основная Workers AI модель для канонических фотографий.',
     adapter: 'flux2-klein',
     maxReferences: 4,
     guidance: 1.0,
@@ -45,7 +54,7 @@ export const AI_IMAGE_MODELS = {
     provider: 'cloudflare',
     apiModel: '@cf/black-forest-labs/flux-2-dev',
     label: 'Cloudflare · FLUX.2 Dev',
-    description: 'Экспериментальный Workers AI режим с отдельным BodyDNA prompt adapter.',
+    description: 'FLUX.2 Dev с отдельным BodyDNA prompt adapter.',
     adapter: 'flux2-dev',
     maxReferences: 4,
     guidance: 1.0,
@@ -55,17 +64,7 @@ export const AI_IMAGE_MODELS = {
     provider: 'pollinations',
     apiModel: 'klein',
     label: 'Pollinations · Klein',
-    description: 'Pollinations image model с поддержкой reference images. Использует Klein BodyDNA adapter.',
-    adapter: 'pollinations-klein',
-    maxReferences: 4,
-    guidance: 1.0,
-  },
-  'pollinations-nanobanana-2': {
-    key: 'pollinations-nanobanana-2',
-    provider: 'pollinations',
-    apiModel: 'nanobanana-2',
-    label: 'Pollinations · Nano Banana 2',
-    description: 'Альтернативная image/edit модель Pollinations с reference image support.',
+    description: 'Pollinations Klein с reference images.',
     adapter: 'pollinations-klein',
     maxReferences: 4,
     guidance: 1.0,
@@ -75,17 +74,57 @@ export const AI_IMAGE_MODELS = {
     provider: 'pollinations',
     apiModel: 'gptimage',
     label: 'Pollinations · GPT Image',
-    description: 'Image/edit модель Pollinations для сравнительных генераций.',
-    adapter: 'pollinations-klein',
+    description: 'Pollinations GPT Image с reference images.',
+    adapter: 'pollinations-gptimage',
     maxReferences: 4,
+    guidance: 1.0,
+  },
+  'pollinations-gptimage-large': {
+    key: 'pollinations-gptimage-large',
+    provider: 'pollinations',
+    apiModel: 'gptimage-large',
+    label: 'Pollinations · GPT Image Large',
+    description: 'Увеличенный GPT Image вариант с reference images.',
+    adapter: 'pollinations-gptimage-large',
+    maxReferences: 4,
+    guidance: 1.0,
+  },
+  'pollinations-kontext': {
+    key: 'pollinations-kontext',
+    provider: 'pollinations',
+    apiModel: 'kontext',
+    label: 'Pollinations · Kontext',
+    description: 'Pollinations Kontext для reference/edit задач.',
+    adapter: 'pollinations-kontext',
+    maxReferences: 4,
+    guidance: 1.0,
+  },
+  'pollinations-flux': {
+    key: 'pollinations-flux',
+    provider: 'pollinations',
+    apiModel: 'flux',
+    label: 'Pollinations · Flux',
+    description: 'Pollinations Flux text-to-image.',
+    adapter: 'pollinations-flux',
+    maxReferences: 0,
+    guidance: 1.0,
+  },
+  'pollinations-zimage': {
+    key: 'pollinations-zimage',
+    provider: 'pollinations',
+    apiModel: 'zimage',
+    label: 'Pollinations · Z-Image',
+    description: 'Pollinations Z-Image text-to-image.',
+    adapter: 'pollinations-zimage',
+    maxReferences: 0,
     guidance: 1.0,
   },
   'aihorde-auto': {
     key: 'aihorde-auto',
     provider: 'aihorde',
     apiModel: '',
-    label: 'AI Horde · Auto / active model',
-    description: 'AI Horde выбирает доступный image worker. В /admin можно указать точное имя модели.',
+    label: 'AI Horde · Auto',
+    description: 'AI Horde выбирает доступный image worker.',
     adapter: 'aihorde-sd',
     maxReferences: 1,
     guidance: 7.0,
