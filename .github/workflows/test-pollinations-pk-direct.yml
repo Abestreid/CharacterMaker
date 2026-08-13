@@ -1,94 +1,13 @@
-name: Test Pollinations publishable key direct mode
+name: Diagnostics cleanup
 
 on:
-  push:
-    branches:
-      - diagnostics/ai-credentials
-    paths:
-      - '.github/workflows/test-pollinations-pk-direct.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  noop:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
-    env:
-      CIPHER_B64: 'AHYOcKCSvU7HfWyVkg0P5TWWZ8KGGoYSVVWEvkY9fufcbLuVJASaDkQjUbialGux'
-      IV_HEX: '876f8cf0baa8b7886c2bb96147f31da1'
-      EXPECTED_SHA256: '5b6227615c605b048854f70c9d3c2ecb724b1989568344bd04264073ba7f7dcd'
     steps:
-      - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y lftp jq
-
-      - name: Decrypt exact Pollinations secret key
-        env:
-          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
-          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME || secrets.FTP_USERNAME || secrets.FTP_USER }}
-          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD || secrets.FTP_PASSWORD || secrets.FTP_PASS }}
-        run: |
-          lftp -c "open -p 21 ftp://$FTP_SERVER; user $FTP_USERNAME $FTP_PASSWORD; cd /htdocs; get .charmaker-ai-settings-dev.php -o /tmp/settings.php; bye"
-          horde_b64=$(php -r '$s=require "/tmp/settings.php"; foreach($s["credentials"] as $x) if(($x["provider"]??"")==="aihorde"){echo base64_encode((string)($x["apiKey"]??""));break;}')
-          horde_key=$(printf '%s' "$horde_b64" | base64 -d)
-          test -n "$horde_key"
-          decrypt_hex=$(printf 'CharacterMaker-Pollinations-Test-v2|%s' "$horde_key" | sha256sum | awk '{print $1}')
-          printf '%s' "$CIPHER_B64" | base64 -d > /tmp/candidate.enc
-          openssl enc -d -aes-256-cbc -K "$decrypt_hex" -iv "$IV_HEX" -in /tmp/candidate.enc -out /tmp/poll.sk
-          sk=$(cat /tmp/poll.sk)
-          echo "::add-mask::$sk"
-          actual=$(printf '%s' "$sk" | sha256sum | awk '{print $1}')
-          test "$actual" = "$EXPECTED_SHA256"
-          echo 'secret_exact_match=yes'
-
-      - name: Create temporary app key, direct generate, revoke
-        run: |
-          set +e
-          sk=$(cat /tmp/poll.sk)
-          echo "::add-mask::$sk"
-
-          create_code=$(curl -sS -o /tmp/create.json -w '%{http_code}' --max-time 40 -X POST \
-            -H "Authorization: Bearer $sk" \
-            -H 'Content-Type: application/json' \
-            -H 'Accept: application/json' \
-            -d '{"name":"CharacterMaker DEV direct-free test","type":"publishable","redirectUris":["https://charmaker.free.nf/dev/"],"allowedModels":["klein","flux","zimage","gptimage","gptimage-large","kontext"],"earningsEnabled":false}' \
-            'https://gen.pollinations.ai/account/keys')
-          echo "create_pk_http=$create_code"
-          pk=$(jq -r '.key // empty' /tmp/create.json 2>/dev/null)
-          id=$(jq -r '.id // empty' /tmp/create.json 2>/dev/null)
-          if [ -z "$pk" ] || [ -z "$id" ]; then
-            echo 'pk_created=no'
-            jq -r '.error.message // .error // .message // "no_key_returned"' /tmp/create.json 2>/dev/null | head -c 500; echo
-            exit 0
-          fi
-          echo "::add-mask::$pk"
-          echo 'pk_created=yes'
-
-          info_code=$(curl -sS -o /tmp/pk-info.json -w '%{http_code}' --max-time 40 -H "Authorization: Bearer $pk" -H 'Accept: application/json' 'https://gen.pollinations.ai/account/key')
-          echo "pk_info_http=$info_code"
-          jq '{valid,type,permissions,pollenBudget,rateLimitEnabled}' /tmp/pk-info.json 2>/dev/null || true
-
-          bal_code=$(curl -sS -o /tmp/pk-balance.json -w '%{http_code}' --max-time 40 -H "Authorization: Bearer $pk" -H 'Accept: application/json' 'https://gen.pollinations.ai/account/balance')
-          echo "pk_balance_http=$bal_code"
-          jq '{balance}' /tmp/pk-balance.json 2>/dev/null || true
-
-          gen_code=$(curl -sS -o /tmp/gen.json -w '%{http_code}' --max-time 120 -X POST \
-            -H "Authorization: Bearer $pk" \
-            -H 'Content-Type: application/json' \
-            -H 'Accept: application/json' \
-            -d '{"model":"klein","prompt":"plain white ceramic sphere centered on a white studio background","n":1,"size":"512x512","response_format":"b64_json"}' \
-            'https://gen.pollinations.ai/v1/images/generations')
-          echo "direct_pk_generation_http=$gen_code"
-          if [ "$gen_code" = "200" ] && jq -e '.data[0].b64_json or .data[0].url' /tmp/gen.json >/dev/null 2>&1; then
-            echo 'direct_pk_generation=image_received'
-          else
-            echo 'direct_pk_generation=no_image'
-            jq -r '.error.message // .error // .message // "unknown"' /tmp/gen.json 2>/dev/null | head -c 500; echo
-          fi
-
-          revoke_code=$(curl -sS -o /tmp/revoke.json -w '%{http_code}' --max-time 40 -X DELETE -H "Authorization: Bearer $sk" -H 'Accept: application/json' "https://gen.pollinations.ai/account/keys/$id")
-          echo "temporary_pk_revoke_http=$revoke_code"
-
-      - name: Cleanup
-        if: always()
-        run: rm -f /tmp/poll.sk /tmp/candidate.enc /tmp/settings.php /tmp/create.json /tmp/pk-info.json /tmp/pk-balance.json /tmp/gen.json /tmp/revoke.json
+      - run: echo clean
