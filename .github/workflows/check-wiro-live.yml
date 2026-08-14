@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      CIPHER_B64: 'REPLACE_CIPHER'
-      IV_HEX: 'REPLACE_IV'
+      CIPHER_B64: 'AaPbSpVUbIZBb9U8Pc4iR29Jm/jtrYdi0+GyQbVmr8qXc9HAxuirZbxbDUfteOo9UM2VXaKlZOdD9P4kKNaVYbT2onAlWzI6u1MprB6PZyGZDW5XmTKN6QQmq6mMuZ9wZQQlpl8sZfYPJR/xTiGrsAL+nuqX258iV5ux+UzVpqo='
+      IV_HEX: 'b79f476ee654d11116173afcefee4561'
     steps:
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y lftp jq
@@ -80,7 +80,6 @@ jobs:
           echo "run_result=$(jq -r '.result // false' /tmp/run.json 2>/dev/null)"
           jq -c '.errors // []' /tmp/run.json 2>/dev/null | sed 's/^/run_errors=/'
           taskid=$(jq -r '.taskid // empty' /tmp/run.json 2>/dev/null)
-          token=$(jq -r '.socketaccesstoken // empty' /tmp/run.json 2>/dev/null)
           echo "task_created=$([ -n "$taskid" ] && echo yes || echo no)"
           if [ -z "$taskid" ]; then exit 0; fi
 
