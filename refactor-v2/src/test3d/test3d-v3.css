@@ -1,3 +1,33 @@
+.lab3d-release-strip {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(139, 92, 246, .36);
+  background: rgba(9, 9, 11, .96);
+  backdrop-filter: blur(12px);
+  color: #a1a1aa;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: .03em;
+}
+
+.lab3d-release-strip strong {
+  color: #ddd6fe;
+  font-size: 11px;
+  letter-spacing: .06em;
+}
+
+.lab3d-release-strip span:nth-of-type(1) {
+  color: #86efac;
+  font-variant-numeric: tabular-nums;
+}
+
 .lab3d-shape-section {
   display: grid;
   gap: 10px;
@@ -46,6 +76,16 @@
 }
 
 @media (max-width: 560px) {
+  .lab3d-release-strip {
+    justify-content: flex-start;
+    gap: 7px;
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+
+  .lab3d-release-strip::-webkit-scrollbar { display: none; }
+
   .lab3d-shape-section {
     margin-top: 14px;
     padding-top: 13px;
