@@ -79,7 +79,7 @@ jobs:
         with:
           tool: wasm-pack
 
-      - name: Build CharacterMaker OxiHuman body pack and browser runtime
+      - name: Build CharacterBody v4 pack and browser runtime
         id: oxihuman
         working-directory: .
         run: |
@@ -88,31 +88,17 @@ jobs:
           python3 refactor-v2/scripts/patch_oxihuman_charactermaker.py .vendor/oxihuman
 
           cd .vendor/oxihuman
+          cargo test -p oxihuman-wasm charactermaker_breast_macro_tests -- --nocapture
           scripts/fetch_upstream_assets.sh
           cargo run --release -p oxihuman-cli -- \
             pack-core \
             --tier core \
-            --budget-gzip-bytes 8388608
+            --budget-gzip-bytes 12582912
 
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          path = Path('assets/packs/oxihuman-core-v1.provenance.json')
-          data = json.loads(path.read_text(encoding='utf-8'))
-          targets = {row['name'] for row in data.get('targets', [])}
-          required = {
-              'breast/breast-point-incr',
-              'breast/breast-volume-vert-up',
-              'breast/breast-trans-down',
-              'buttocks/buttocks-volume-incr',
-              'hip/hip-scale-depth-incr',
-          }
-          missing = sorted(required - targets)
-          if missing:
-              raise SystemExit(f'CharacterMaker shape targets missing from pack: {missing}')
-          print(f'CharacterMaker body pack OK: {len(targets)} targets')
-          PY
+          test -s assets/packs/oxihuman-core-v1.ohpk
+          test -s assets/packs/oxihuman-core-v1.provenance.json
+          python3 ../../refactor-v2/scripts/validate_charactermaker_body_pack.py \
+            assets/packs/oxihuman-core-v1.provenance.json
 
           scripts/build_demo.sh
           cd ../..
@@ -172,8 +158,8 @@ jobs:
               'run_id': os.environ['GITHUB_RUN_ID'],
               'built_at': datetime.now(timezone.utc).isoformat(),
               'oxihuman_commit': os.environ['OXIHUMAN_COMMIT'],
-              'body_pack': 'charactermaker-shapes-v1',
-              'test3d_version': '3.1.0',
+              'body_pack': 'charactermaker-body-v4',
+              'test3d_version': '4.0.0',
           }, ensure_ascii=False, indent=2), encoding='utf-8')
           PY
 
@@ -189,16 +175,8 @@ jobs:
           test -s dist/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
           test -s dist/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
           test -s dist/test3d/oxihuman/pack/oxihuman-core-v1.provenance.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          data = json.loads(Path('dist/test3d/oxihuman/pack/oxihuman-core-v1.provenance.json').read_text(encoding='utf-8'))
-          targets = {row['name'] for row in data.get('targets', [])}
-          required = {'breast/breast-point-incr', 'breast/breast-volume-vert-up', 'buttocks/buttocks-volume-incr'}
-          missing = sorted(required - targets)
-          if missing:
-              raise SystemExit(f'Dist pack missing CharacterMaker shape targets: {missing}')
-          PY
+          python scripts/validate_charactermaker_body_pack.py \
+            dist/test3d/oxihuman/pack/oxihuman-core-v1.provenance.json
 
       - name: Install FTP client
         id: ftp_client
@@ -255,9 +233,9 @@ jobs:
           actual = remote.get('commit')
           if actual != expected:
               raise SystemExit(f'Remote DEV commit mismatch: expected {expected}, got {actual}')
-          if remote.get('body_pack') != 'charactermaker-shapes-v1':
+          if remote.get('body_pack') != 'charactermaker-body-v4':
               raise SystemExit(f"Remote body pack mismatch: {remote.get('body_pack')}")
-          if remote.get('test3d_version') != '3.1.0':
+          if remote.get('test3d_version') != '4.0.0':
               raise SystemExit(f"Remote test3d version mismatch: {remote.get('test3d_version')}")
           print(f'VERIFIED_REMOTE_COMMIT={actual}')
           PY
@@ -289,7 +267,7 @@ jobs:
           if [ -f /tmp/charmaker-dev.html ]; then head -c 500 /tmp/charmaker-dev.html || true; fi
           exit 1
 
-      - name: OxiHuman test3d asset smoke check
+      - name: CharacterBody test3d asset smoke check
         id: oxihuman_http
         working-directory: .
         run: |
@@ -333,7 +311,7 @@ jobs:
         run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-android-chrome.png
         working-directory: .
 
-      - name: Verify CharacterMaker test3d on Android Chrome profile
+      - name: Verify CharacterBody test3d on Android Chrome profile
         id: android_oxi
         run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=18000 --full-page "${DEPLOY_URL}test3d/?commit=$GITHUB_SHA" /tmp/charmaker-dev-test3d-android.png
         working-directory: .
@@ -361,7 +339,7 @@ jobs:
           payload=$(jq -n \
             --arg state success \
             --arg target_url "$DEPLOY_URL" \
-            --arg description "DEV + TEST3D v3.1.0 CharacterMaker shape pack deployed" \
+            --arg description "DEV + TEST3D v4.0.0 CharacterBody v4 deployed" \
             --arg context "deployment/dev" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
@@ -382,7 +360,7 @@ jobs:
           payload=$(jq -n \
             --arg state failure \
             --arg target_url "$run_url" \
-            --arg description "TEST3D v3.1.0 shape-pack build or deploy failed" \
+            --arg description "TEST3D v4.0.0 CharacterBody build or deploy failed" \
             --arg context "deployment/dev" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
