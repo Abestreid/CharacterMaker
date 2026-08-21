@@ -24,6 +24,17 @@ import {
 } from './oxiHumanSceneV3';
 import './test3d.css';
 
+type NumericKey = 'height' | 'weight' | 'bust' | 'waist' | 'hips' | 'bodyFat';
+type ControlSpec = {
+  key: NumericKey;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+  fit: boolean;
+};
+
 const DEFAULTS: BodyParams = {
   gender: 'female',
   height: CHARACTER_MEASUREMENTS.height.defaultValue,
@@ -40,19 +51,22 @@ const DEFAULTS: BodyParams = {
   buttockFirmnessId: 'natural',
 };
 
-type NumericKey = 'height' | 'weight' | 'bust' | 'waist' | 'hips' | 'bodyFat';
+const CONTROL_SPECS: ControlSpec[] = [
+  { key: 'height', ...CHARACTER_MEASUREMENTS.height, fit: true },
+  { key: 'weight', ...CHARACTER_MEASUREMENTS.weight, fit: false },
+  { key: 'bust', ...CHARACTER_MEASUREMENTS.bust, fit: true },
+  { key: 'waist', ...CHARACTER_MEASUREMENTS.waist, fit: true },
+  { key: 'hips', ...CHARACTER_MEASUREMENTS.hips, fit: true },
+  { key: 'bodyFat', ...CHARACTER_MEASUREMENTS.bodyFat, fit: false },
+];
 
-const CONTROLS = ([
-  ['height', CHARACTER_MEASUREMENTS.height, true],
-  ['weight', CHARACTER_MEASUREMENTS.weight, false],
-  ['bust', CHARACTER_MEASUREMENTS.bust, true],
-  ['waist', CHARACTER_MEASUREMENTS.waist, true],
-  ['hips', CHARACTER_MEASUREMENTS.hips, true],
-  ['bodyFat', CHARACTER_MEASUREMENTS.bodyFat, false],
-] as const).map(([key, definition, fit]) => ({ key, ...definition, fit }));
+const BUST_CONTROL = CONTROL_SPECS.find((item) => item.key === 'bust')!;
+const FEMALE_BODY_CONTROLS = CONTROL_SPECS.filter((item) => item.key !== 'bust');
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const fmt = (value: number | null, digits = 1) => value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
+const labelFor = (options: readonly { id: string; label: string }[], value: string | null) =>
+  options.find((option) => option.id === value)?.label ?? '—';
 
 function SelectRow(props: {
   label: string;
@@ -66,6 +80,41 @@ function SelectRow(props: {
       <select value={props.value ?? ''} onChange={(event) => props.onChange(event.currentTarget.value)}>
         {props.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
       </select>
+    </label>
+  );
+}
+
+function NumericControl(props: {
+  control: ControlSpec;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  const { control, value, onChange } = props;
+  return (
+    <label className="lab3d-control">
+      <span className="lab3d-control-head">
+        <span>{control.label}{control.fit ? <sup>fit</sup> : null}</span>
+        <strong>{value} {control.unit}</strong>
+      </span>
+      <span className="lab3d-control-row">
+        <input
+          type="range"
+          min={control.min}
+          max={control.max}
+          step={control.step}
+          value={value}
+          onChange={(event) => onChange(Number(event.currentTarget.value))}
+        />
+        <input
+          type="number"
+          min={control.min}
+          max={control.max}
+          step={control.step}
+          value={value}
+          onChange={(event) => onChange(Number(event.currentTarget.value))}
+          aria-label={`${control.label}, точное значение`}
+        />
+      </span>
     </label>
   );
 }
@@ -100,6 +149,12 @@ export function Test3DAppV3() {
       bwr: params.bust / params.waist,
     };
   }, [params]);
+
+  const breastSummary = useMemo(() => ({
+    size: labelFor(BREAST_SIZE_OPTIONS, params.breastSizeId),
+    shape: labelFor(BREAST_SHAPES, params.breastShapeId),
+    firmness: labelFor(BREAST_FIRMNESS_OPTIONS, params.breastFirmnessId),
+  }), [params.breastFirmnessId, params.breastShapeId, params.breastSizeId]);
 
   const runFit = async (target = latestRef.current) => {
     const scene = sceneRef.current;
@@ -195,7 +250,7 @@ export function Test3DAppV3() {
   useEffect(() => { sceneRef.current?.setAutoRotate(autoRotate); }, [autoRotate]);
 
   const setNumeric = (key: NumericKey, raw: number) => {
-    const spec = CONTROLS.find((item) => item.key === key);
+    const spec = CONTROL_SPECS.find((item) => item.key === key);
     if (!spec) return;
     setParams((current) => ({
       ...current,
@@ -215,14 +270,15 @@ export function Test3DAppV3() {
 
   const measured = fitResult?.measurements ?? null;
   const delta = (actual: number | null, target: number) => actual == null ? '—' : `${actual - target >= 0 ? '+' : ''}${(actual - target).toFixed(1)}`;
+  const bodyControls = params.gender === 'female' ? FEMALE_BODY_CONTROLS : CONTROL_SPECS;
 
   return (
     <main className="lab3d-page">
       <header className="lab3d-header">
         <div>
-          <div className="lab3d-eyebrow">CharacterMaker /dev/test3d</div>
+          <div className="lab3d-eyebrow">CharacterMaker /dev/test3d · V3</div>
           <h1>CharacterMaker 3D Body Lab</h1>
-          <p>OxiHuman отвечает за WASM, mesh и fitting. Форма груди и ягодиц берётся из отдельного CharacterMaker pack на CC0 MakeHuman morph targets.</p>
+          <p>Обхват задаёт целевую мерку, а размер, тип/форма и упругость груди независимо меняют распределение объёма в mesh.</p>
         </div>
         <div className={`lab3d-engine-badge ${engineReady ? 'ready' : ''}`}>
           {engineReady ? `OxiHuman ${fitResult?.version ?? ''} · CM SHAPES` : 'OxiHuman loading'}
@@ -309,15 +365,32 @@ export function Test3DAppV3() {
             <button type="button" disabled={!engineReady || fitState === 'fitting'} onClick={() => void runFit()}>Fit сейчас</button>
           </div>
 
-          <div className="lab3d-controls-list">
-            {CONTROLS.map((control) => (
-              <label className="lab3d-control" key={control.key}>
-                <span className="lab3d-control-head"><span>{control.label}{control.fit ? <sup>fit</sup> : null}</span><strong>{params[control.key]} {control.unit}</strong></span>
-                <span className="lab3d-control-row">
-                  <input type="range" min={control.min} max={control.max} step={control.step} value={params[control.key]} onChange={(event) => setNumeric(control.key, Number(event.currentTarget.value))} />
-                  <input type="number" min={control.min} max={control.max} step={control.step} value={params[control.key]} onChange={(event) => setNumeric(control.key, Number(event.currentTarget.value))} aria-label={`${control.label}, точное значение`} />
-                </span>
-              </label>
+          {params.gender === 'female' ? (
+            <section className="lab3d-breast-card" aria-label="Параметры груди">
+              <div className="lab3d-breast-head">
+                <div>
+                  <h3>Грудь: обхват + размер + тип</h3>
+                  <p>{params.bust} см · {breastSummary.size} · {breastSummary.shape} · {breastSummary.firmness}</p>
+                </div>
+                <span>{breastSummary.size}</span>
+              </div>
+              <NumericControl control={BUST_CONTROL} value={params.bust} onChange={(value) => setNumeric('bust', value)} />
+              <div className="lab3d-breast-selects">
+                <SelectRow label="Размер груди" value={params.breastSizeId} options={BREAST_SIZE_OPTIONS} onChange={(value) => setParams((current) => ({ ...current, breastSizeId: value as BreastSizeId }))} />
+                <SelectRow label="Тип / форма" value={params.breastShapeId} options={BREAST_SHAPES} onChange={(value) => setParams((current) => ({ ...current, breastShapeId: value as BreastShapeId }))} />
+                <SelectRow label="Упругость" value={params.breastFirmnessId} options={BREAST_FIRMNESS_OPTIONS} onChange={(value) => setParams((current) => ({ ...current, breastFirmnessId: value as BreastFirmnessId }))} />
+              </div>
+            </section>
+          ) : null}
+
+          <div className="lab3d-controls-list lab3d-body-controls">
+            {bodyControls.map((control) => (
+              <NumericControl
+                key={control.key}
+                control={control}
+                value={params[control.key]}
+                onChange={(value) => setNumeric(control.key, value)}
+              />
             ))}
           </div>
 
@@ -326,15 +399,6 @@ export function Test3DAppV3() {
             <SelectRow label="Мышечная масса" value={params.muscleMassId} options={MUSCLE_MASS_OPTIONS} onChange={(value) => setParams((current) => ({ ...current, muscleMassId: value as MuscleMassId }))} />
           </div>
 
-          {params.gender === 'female' ? (
-            <div className="lab3d-shape-section">
-              <h3>Грудь</h3>
-              <SelectRow label="Размер" value={params.breastSizeId} options={BREAST_SIZE_OPTIONS} onChange={(value) => setParams((current) => ({ ...current, breastSizeId: value as BreastSizeId }))} />
-              <SelectRow label="Форма" value={params.breastShapeId} options={BREAST_SHAPES} onChange={(value) => setParams((current) => ({ ...current, breastShapeId: value as BreastShapeId }))} />
-              <SelectRow label="Упругость" value={params.breastFirmnessId} options={BREAST_FIRMNESS_OPTIONS} onChange={(value) => setParams((current) => ({ ...current, breastFirmnessId: value as BreastFirmnessId }))} />
-            </div>
-          ) : null}
-
           <div className="lab3d-shape-section">
             <h3>Ягодицы</h3>
             <SelectRow label="Форма" value={params.buttockShapeId} options={BUTTOCK_SHAPES} onChange={(value) => setParams((current) => ({ ...current, buttockShapeId: value as ButtockShapeId }))} />
@@ -342,8 +406,8 @@ export function Test3DAppV3() {
           </div>
 
           <div className="lab3d-note">
-            <strong>Логика CharacterMaker</strong>
-            <p>Обхват груди и бедер остаётся целевой меркой. Тип/форма перераспределяет объём через CC0 morph targets, после чего OxiHuman повторно измеряет получившийся mesh.</p>
+            <strong>Как сочетается грудь</strong>
+            <p><b>{params.bust} см</b> задаёт целевой обхват. <b>{breastSummary.size}</b>, <b>{breastSummary.shape}</b> и <b>{breastSummary.firmness}</b> меняют геометрию внутри этого обхвата, после чего OxiHuman повторно измеряет mesh.</p>
           </div>
         </aside>
       </section>
