@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BodyScene, type BodyParams, type CameraView, type Gender } from './bodyScene';
+import {
+  OxiHumanScene,
+  type BodyParams,
+  type CameraView,
+  type Gender,
+  type OxiFitResult,
+  type OxiLoadProgress,
+} from './oxiHumanScene';
 import './test3d.css';
 
 const DEFAULTS: BodyParams = {
@@ -22,19 +29,19 @@ type ControlSpec = {
   max: number;
   step: number;
   unit: string;
+  exactFit?: boolean;
 };
 
 const CONTROLS: ControlSpec[] = [
-  { key: 'height', label: 'Рост', min: 140, max: 220, step: 1, unit: 'см' },
+  { key: 'height', label: 'Рост', min: 140, max: 220, step: 1, unit: 'см', exactFit: true },
   { key: 'weight', label: 'Вес', min: 40, max: 150, step: 1, unit: 'кг' },
-  { key: 'bust', label: 'Грудь', min: 70, max: 140, step: 1, unit: 'см' },
-  { key: 'waist', label: 'Талия', min: 50, max: 120, step: 1, unit: 'см' },
-  { key: 'hips', label: 'Бедра', min: 70, max: 140, step: 1, unit: 'см' },
+  { key: 'bust', label: 'Грудь', min: 70, max: 140, step: 1, unit: 'см', exactFit: true },
+  { key: 'waist', label: 'Талия', min: 50, max: 120, step: 1, unit: 'см', exactFit: true },
+  { key: 'hips', label: 'Бедра', min: 70, max: 140, step: 1, unit: 'см', exactFit: true },
   { key: 'bodyFat', label: 'Жир', min: 8, max: 45, step: 1, unit: '%' },
 ];
 
 const MUSCLE_LABELS = ['Мягкая', 'Тонизированная', 'Атлетическая', 'Мускулистая'];
-
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 function classify(params: BodyParams) {
@@ -53,40 +60,143 @@ function classify(params: BodyParams) {
   return 'Средняя мужская';
 }
 
+function fmt(value: number | null, digits = 1) {
+  return value == null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
+}
+
+function deltaClass(delta: number | null) {
+  if (delta == null) return '';
+  const abs = Math.abs(delta);
+  if (abs <= 1) return 'good';
+  if (abs <= 3) return 'warn';
+  return 'bad';
+}
+
+function deltaText(actual: number | null, target: number) {
+  if (actual == null) return '—';
+  const delta = actual - target;
+  return `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}`;
+}
+
 export function Test3DApp() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const sceneRef = useRef<BodyScene | null>(null);
+  const sceneRef = useRef<OxiHumanScene | null>(null);
+  const latestParamsRef = useRef<BodyParams>(DEFAULTS);
+  const fitTimerRef = useRef<number | null>(null);
+  const fittingRef = useRef(false);
+
   const [params, setParams] = useState<BodyParams>(DEFAULTS);
   const [view, setView] = useState<CameraView>('front');
   const [showMeasurements, setShowMeasurements] = useState(true);
   const [showGrid, setShowGrid] = useState(true);
   const [autoRotate, setAutoRotate] = useState(false);
-  const [webglError, setWebglError] = useState<string | null>(null);
+  const [loadProgress, setLoadProgress] = useState<OxiLoadProgress>({
+    phase: 'wasm',
+    progress: 0,
+    label: 'Запускаю OxiHuman',
+  });
+  const [engineReady, setEngineReady] = useState(false);
+  const [engineError, setEngineError] = useState<string | null>(null);
+  const [fitState, setFitState] = useState<'idle' | 'pending' | 'fitting' | 'ready' | 'error'>('idle');
+  const [fitError, setFitError] = useState<string | null>(null);
+  const [fitResult, setFitResult] = useState<OxiFitResult | null>(null);
+
+  latestParamsRef.current = params;
+
+  const performFit = async (target: BodyParams) => {
+    const scene = sceneRef.current;
+    if (!scene || fittingRef.current) return;
+
+    fittingRef.current = true;
+    setFitState('fitting');
+    setFitError(null);
+    try {
+      const result = await scene.fit(target);
+      setFitResult(result);
+      setFitState('ready');
+    } catch (error) {
+      setFitError(error instanceof Error ? error.message : String(error));
+      setFitState('error');
+    } finally {
+      fittingRef.current = false;
+    }
+  };
+
+  const fitNow = () => {
+    if (fitTimerRef.current != null) window.clearTimeout(fitTimerRef.current);
+    fitTimerRef.current = null;
+    void performFit(latestParamsRef.current);
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
-    try {
-      const bodyScene = new BodyScene(canvas);
-      sceneRef.current = bodyScene;
-      bodyScene.update(params, showMeasurements);
-      bodyScene.setView('front');
-      return () => {
-        bodyScene.dispose();
-        sceneRef.current = null;
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Не удалось запустить WebGL.';
-      setWebglError(message);
-      return undefined;
-    }
-    // Initial scene only. Parameter updates are handled below.
+
+    let cancelled = false;
+    let localScene: OxiHumanScene | null = null;
+
+    const boot = async () => {
+      try {
+        const scene = await OxiHumanScene.create(canvas, (progress) => {
+          if (!cancelled) setLoadProgress(progress);
+        });
+        if (cancelled) {
+          scene.dispose();
+          return;
+        }
+
+        localScene = scene;
+        sceneRef.current = scene;
+        scene.setGridVisible(showGrid);
+        scene.setAutoRotate(autoRotate);
+        scene.setView(view);
+        setEngineReady(true);
+        setEngineError(null);
+        setFitState('fitting');
+
+        const result = await scene.fit(latestParamsRef.current);
+        if (!cancelled) {
+          setFitResult(result);
+          setFitState('ready');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setEngineError(error instanceof Error ? error.message : String(error));
+          setFitState('error');
+        }
+      }
+    };
+
+    void boot();
+
+    return () => {
+      cancelled = true;
+      if (fitTimerRef.current != null) window.clearTimeout(fitTimerRef.current);
+      localScene?.dispose();
+      sceneRef.current = null;
+    };
+    // Initial engine boot only. Live state is synchronized by effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    sceneRef.current?.update(params, showMeasurements);
-  }, [params, showMeasurements]);
+    const scene = sceneRef.current;
+    if (!scene || !engineReady) return undefined;
+
+    scene.preview(params);
+    setFitState('pending');
+    if (fitTimerRef.current != null) window.clearTimeout(fitTimerRef.current);
+    fitTimerRef.current = window.setTimeout(() => {
+      fitTimerRef.current = null;
+      void performFit(latestParamsRef.current);
+    }, 650);
+
+    return () => {
+      if (fitTimerRef.current != null) window.clearTimeout(fitTimerRef.current);
+    };
+    // performFit intentionally reads the latest scene through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, engineReady]);
 
   useEffect(() => {
     sceneRef.current?.setView(view);
@@ -123,19 +233,22 @@ export function Test3DApp() {
   };
 
   const setGender = (gender: Gender) => setParams((current) => ({ ...current, gender }));
+  const measured = fitResult?.measurements ?? null;
 
   return (
     <main className="lab3d-page">
       <header className="lab3d-header">
         <div>
           <div className="lab3d-eyebrow">CharacterMaker /dev/test3d</div>
-          <h1>3D Body Lab</h1>
+          <h1>OxiHuman 3D Body Lab</h1>
           <p>
-            Отдельный тест объемного тела. Модель можно вращать пальцем, а грудь, талия, бедра, рост, вес,
-            процент жира и мышечность перестраиваются в реальном времени.
+            Теперь здесь настоящий параметрический human mesh. Рост, грудь, талия и бедра подгоняются OxiHuman по
+            сантиметрам, после чего движок повторно измеряет уже получившуюся геометрию.
           </p>
         </div>
-        <div className="lab3d-engine-badge">Three.js parametric v1</div>
+        <div className={`lab3d-engine-badge ${engineReady ? 'ready' : ''}`}>
+          {fitResult ? `OxiHuman ${fitResult.version}` : engineReady ? 'OxiHuman ready' : 'OxiHuman loading'}
+        </div>
       </header>
 
       <section className="lab3d-layout">
@@ -167,13 +280,33 @@ export function Test3DApp() {
           </div>
 
           <div className="lab3d-stage">
-            {webglError ? (
-              <div className="lab3d-error">
-                <strong>WebGL недоступен</strong>
-                <span>{webglError}</span>
+            {!engineReady && !engineError ? (
+              <div className="lab3d-loading">
+                <strong>{loadProgress.label}</strong>
+                <span>{Math.round(loadProgress.progress * 100)}%</span>
+                <div className="lab3d-loading-track"><i style={{ width: `${Math.round(loadProgress.progress * 100)}%` }} /></div>
+                <small>WASM + локальный core pack, без серверной генерации</small>
               </div>
             ) : null}
-            <canvas ref={canvasRef} aria-label="Интерактивная 3D модель тела" />
+
+            {engineError ? (
+              <div className="lab3d-error">
+                <strong>OxiHuman не запустился</strong>
+                <span>{engineError}</span>
+              </div>
+            ) : null}
+
+            <canvas ref={canvasRef} aria-label="Интерактивная OxiHuman 3D модель тела" />
+
+            {showMeasurements && measured ? (
+              <div className="lab3d-measure-overlay">
+                <div><span>Рост</span><strong>{fmt(measured.heightCm)} см</strong><em className={deltaClass(measured.heightCm == null ? null : measured.heightCm - params.height)}>Δ {deltaText(measured.heightCm, params.height)}</em></div>
+                <div><span>Грудь</span><strong>{fmt(measured.chestCm)} см</strong><em className={deltaClass(measured.chestCm == null ? null : measured.chestCm - params.bust)}>Δ {deltaText(measured.chestCm, params.bust)}</em></div>
+                <div><span>Талия</span><strong>{fmt(measured.waistCm)} см</strong><em className={deltaClass(measured.waistCm == null ? null : measured.waistCm - params.waist)}>Δ {deltaText(measured.waistCm, params.waist)}</em></div>
+                <div><span>Бедра</span><strong>{fmt(measured.hipCm)} см</strong><em className={deltaClass(measured.hipCm == null ? null : measured.hipCm - params.hips)}>Δ {deltaText(measured.hipCm, params.hips)}</em></div>
+              </div>
+            ) : null}
+
             <div className="lab3d-stage-hint">1 палец - вращение · щипок - масштаб</div>
           </div>
 
@@ -184,6 +317,16 @@ export function Test3DApp() {
             <div><span>Грудь / талия</span><strong>{metrics.bwr.toFixed(2)}</strong></div>
             <div className="wide"><span>Тип фигуры</span><strong>{metrics.type}</strong></div>
           </div>
+
+          {fitResult ? (
+            <div className="lab3d-engine-meta">
+              <span>{fitResult.vertexCount.toLocaleString('ru-RU')} вершин</span>
+              <span>{fitResult.indexCount.toLocaleString('ru-RU')} индексов</span>
+              <span>fit {(fitResult.elapsedMs / 1000).toFixed(2)} с</span>
+              <span>{fitResult.iterations} итераций</span>
+              <span className={fitResult.converged ? 'ok' : 'warn'}>{fitResult.converged ? 'converged' : 'iteration cap'}</span>
+            </div>
+          ) : null}
         </div>
 
         <aside className="lab3d-controls-card">
@@ -200,11 +343,24 @@ export function Test3DApp() {
             <button type="button" className={params.gender === 'male' ? 'active' : ''} onClick={() => setGender('male')}>Мужской</button>
           </div>
 
+          <div className={`lab3d-fit-state ${fitState}`}>
+            <span className="dot" />
+            <div>
+              <strong>
+                {fitState === 'fitting' ? 'Подгоняю настоящий mesh…' : fitState === 'pending' ? 'Размеры изменены' : fitState === 'error' ? 'Ошибка fit' : fitState === 'ready' ? 'Mesh измерен' : 'OxiHuman'}
+              </strong>
+              <small>
+                {fitState === 'fitting' ? 'OxiHuman оптимизирует геометрию по сантиметрам.' : fitState === 'pending' ? 'Автоподгонка запустится после остановки ползунка.' : fitState === 'error' ? fitError : fitResult ? `Последний fit: ${(fitResult.elapsedMs / 1000).toFixed(2)} с` : 'Инициализация.'}
+              </small>
+            </div>
+            <button type="button" onClick={fitNow} disabled={!engineReady || fitState === 'fitting'}>Fit сейчас</button>
+          </div>
+
           <div className="lab3d-controls-list">
             {CONTROLS.map((control) => (
               <label className="lab3d-control" key={control.key}>
                 <span className="lab3d-control-head">
-                  <span>{control.label}</span>
+                  <span>{control.label}{control.exactFit ? <sup>fit</sup> : null}</span>
                   <strong>{params[control.key]} {control.unit}</strong>
                 </span>
                 <span className="lab3d-control-row">
@@ -215,6 +371,7 @@ export function Test3DApp() {
                     step={control.step}
                     value={params[control.key]}
                     onChange={(event) => setNumeric(control.key, Number(event.currentTarget.value))}
+                    onPointerUp={control.exactFit ? fitNow : undefined}
                   />
                   <input
                     type="number"
@@ -223,6 +380,10 @@ export function Test3DApp() {
                     step={control.step}
                     value={params[control.key]}
                     onChange={(event) => setNumeric(control.key, Number(event.currentTarget.value))}
+                    onBlur={control.exactFit ? fitNow : undefined}
+                    onKeyDown={(event) => {
+                      if (control.exactFit && event.key === 'Enter') fitNow();
+                    }}
                     aria-label={`${control.label}, точное значение`}
                   />
                 </span>
@@ -257,9 +418,10 @@ export function Test3DApp() {
           </div>
 
           <div className="lab3d-note">
-            <strong>Что проверяем сейчас</strong>
-            <p>Удобство 3D, вращение на телефоне и читаемость изменения пропорций. Это renderer-стенд, а не финальная анатомическая модель.</p>
-            <p>Следующий движок в этой же точке интеграции - OxiHuman с fit по реальным сантиметрам.</p>
+            <strong>Что теперь настоящее</strong>
+            <p><b>Рост, грудь, талия и бедра</b> идут в `fit_to_measurements()` OxiHuman и затем повторно измеряются по итоговой сетке.</p>
+            <p>Вес, процент жира и мышечность пока используются как композиционный prior для macro morph. Это отдельный следующий слой калибровки CharacterMaker.</p>
+            <p>OxiHuman: Apache-2.0. Core anthropometric pack: CC0.</p>
           </div>
         </aside>
       </section>
