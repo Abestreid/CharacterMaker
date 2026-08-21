@@ -20,11 +20,12 @@ concurrency:
 env:
   DEPLOY_DIR: /htdocs/dev
   DEPLOY_URL: https://charmaker.free.nf/dev/
+  OXIHUMAN_COMMIT: 603b446854c3d5a9ca478214e7b85008d54786b9
 
 jobs:
   build-test-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     defaults:
       run:
@@ -57,6 +58,46 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Checkout pinned OxiHuman source
+        uses: actions/checkout@v4
+        with:
+          repository: cool-japan/oxihuman
+          ref: ${{ env.OXIHUMAN_COMMIT }}
+          path: .vendor/oxihuman
+          fetch-depth: 1
+
+      - name: Setup Rust for OxiHuman WASM
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Build OxiHuman browser runtime
+        id: oxihuman
+        working-directory: .
+        run: |
+          set -euxo pipefail
+          .vendor/oxihuman/scripts/build_demo.sh
+
+          rm -rf refactor-v2/public/test3d/oxihuman
+          mkdir -p refactor-v2/public/test3d/oxihuman/pkg
+          mkdir -p refactor-v2/public/test3d/oxihuman/pack
+
+          cp -a .vendor/oxihuman/demo/pkg/. refactor-v2/public/test3d/oxihuman/pkg/
+          cp .vendor/oxihuman/demo/pack/oxihuman-core-v1.ohpk refactor-v2/public/test3d/oxihuman/pack/
+          cp .vendor/oxihuman/LICENSE refactor-v2/public/test3d/oxihuman/LICENSE-OXIHUMAN.txt
+          cp .vendor/oxihuman/NOTICE refactor-v2/public/test3d/oxihuman/NOTICE-OXIHUMAN.txt
+
+          test -s refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm.js
+          test -s refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
+          test -s refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
+          du -h refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
+          du -h refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
 
       - name: Install dependencies
         id: dependencies
@@ -94,6 +135,7 @@ jobs:
               'ref': os.environ['GITHUB_REF_NAME'],
               'run_id': os.environ['GITHUB_RUN_ID'],
               'built_at': datetime.now(timezone.utc).isoformat(),
+              'oxihuman_commit': os.environ['OXIHUMAN_COMMIT'],
           }, ensure_ascii=False, indent=2), encoding='utf-8')
           PY
 
@@ -104,6 +146,10 @@ jobs:
           test -f dist/index.html
           test -f dist/build-info.json
           test -d dist/assets
+          test -f dist/test3d/index.html
+          test -s dist/test3d/oxihuman/pkg/oxihuman_wasm.js
+          test -s dist/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
+          test -s dist/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
 
       - name: Install FTP client
         id: ftp_client
@@ -190,6 +236,29 @@ jobs:
           if [ -f /tmp/charmaker-dev.html ]; then head -c 500 /tmp/charmaker-dev.html || true; fi
           exit 1
 
+      - name: OxiHuman test3d asset smoke check
+        id: oxihuman_http
+        working-directory: .
+        run: |
+          set -euo pipefail
+          user_agent='Mozilla/5.0 (Linux; Android 14; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36'
+          base="${DEPLOY_URL}test3d/"
+          for path in \
+            "?commit=$GITHUB_SHA" \
+            "oxihuman/pkg/oxihuman_wasm.js?commit=$GITHUB_SHA" \
+            "oxihuman/pkg/oxihuman_wasm_bg.wasm?commit=$GITHUB_SHA" \
+            "oxihuman/pack/oxihuman-core-v1.ohpk?commit=$GITHUB_SHA"; do
+            code=$(curl --location --silent --show-error --max-time 45 \
+              --connect-timeout 15 \
+              --user-agent "$user_agent" \
+              -H 'Cache-Control: no-cache' \
+              -w '%{http_code}' \
+              "${base}${path}" -o /tmp/oxi-smoke.bin || true)
+            echo "${path}: HTTP ${code}, bytes=$(wc -c < /tmp/oxi-smoke.bin 2>/dev/null || echo 0)"
+            test "$code" = "200"
+            test -s /tmp/oxi-smoke.bin
+          done
+
       - name: Install browsers for mandatory visual verification
         id: browsers
         run: npx --yes playwright@latest install --with-deps chromium webkit
@@ -210,6 +279,11 @@ jobs:
         run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-android-chrome.png
         working-directory: .
 
+      - name: Verify OxiHuman test3d on Android Chrome profile
+        id: android_oxi
+        run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=15000 --full-page "${DEPLOY_URL}test3d/?commit=$GITHUB_SHA" /tmp/charmaker-dev-test3d-android.png
+        working-directory: .
+
       - name: Upload visual verification
         if: always()
         continue-on-error: true
@@ -220,6 +294,7 @@ jobs:
             /tmp/charmaker-dev-desktop-chrome.png
             /tmp/charmaker-dev-ios-webkit.png
             /tmp/charmaker-dev-android-chrome.png
+            /tmp/charmaker-dev-test3d-android.png
           if-no-files-found: ignore
           retention-days: 7
 
@@ -232,7 +307,7 @@ jobs:
           payload=$(jq -n \
             --arg state success \
             --arg target_url "$DEPLOY_URL" \
-            --arg description "V2 DEV deployed and verified on desktop, iOS WebKit and Android Chrome" \
+            --arg description "V2 DEV + OxiHuman test3d deployed and verified" \
             --arg context "deployment/dev" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
@@ -252,7 +327,7 @@ jobs:
           payload=$(jq -n \
             --arg state failure \
             --arg target_url "$DEPLOY_URL" \
-            --arg description "V2 DEV build/deploy/device verification failed" \
+            --arg description "V2 DEV build/deploy/OxiHuman verification failed" \
             --arg context "deployment/dev" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
