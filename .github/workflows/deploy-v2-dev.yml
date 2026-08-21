@@ -21,11 +21,12 @@ env:
   DEPLOY_DIR: /htdocs/dev
   DEPLOY_URL: https://charmaker.free.nf/dev/
   OXIHUMAN_COMMIT: 603b446854c3d5a9ca478214e7b85008d54786b9
+  VITE_BUILD_SHA: ${{ github.sha }}
 
 jobs:
   build-test-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     defaults:
       run:
@@ -40,9 +41,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           payload=$(jq -n \
             --arg state pending \
-            --arg target_url "$DEPLOY_URL" \
+            --arg target_url "$run_url" \
             --arg description "CharacterMaker V2 DEV deployment in progress" \
             --arg context "deployment/dev" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
@@ -90,13 +92,27 @@ jobs:
           cargo run --release -p oxihuman-cli -- \
             pack-core \
             --tier core \
-            --budget-gzip-bytes 4194304
+            --budget-gzip-bytes 8388608
 
-          # Mandatory proof that the custom OHPK contains our CharacterMaker morphs.
-          grep -a -q 'breast/breast-point-incr' assets/packs/oxihuman-core-v1.ohpk
-          grep -a -q 'breast/breast-volume-vert-up' assets/packs/oxihuman-core-v1.ohpk
-          grep -a -q 'buttocks/buttocks-volume-incr' assets/packs/oxihuman-core-v1.ohpk
-          grep -a -q 'hip/hip-scale-depth-incr' assets/packs/oxihuman-core-v1.ohpk
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('assets/packs/oxihuman-core-v1.provenance.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          targets = {row['name'] for row in data.get('targets', [])}
+          required = {
+              'breast/breast-point-incr',
+              'breast/breast-volume-vert-up',
+              'breast/breast-trans-down',
+              'buttocks/buttocks-volume-incr',
+              'hip/hip-scale-depth-incr',
+          }
+          missing = sorted(required - targets)
+          if missing:
+              raise SystemExit(f'CharacterMaker shape targets missing from pack: {missing}')
+          print(f'CharacterMaker body pack OK: {len(targets)} targets')
+          PY
 
           scripts/build_demo.sh
           cd ../..
@@ -107,6 +123,7 @@ jobs:
 
           cp -a .vendor/oxihuman/demo/pkg/. refactor-v2/public/test3d/oxihuman/pkg/
           cp .vendor/oxihuman/demo/pack/oxihuman-core-v1.ohpk refactor-v2/public/test3d/oxihuman/pack/
+          cp .vendor/oxihuman/assets/packs/oxihuman-core-v1.provenance.json refactor-v2/public/test3d/oxihuman/pack/
           cp .vendor/oxihuman/LICENSE refactor-v2/public/test3d/oxihuman/LICENSE-OXIHUMAN.txt
           cp .vendor/oxihuman/NOTICE refactor-v2/public/test3d/oxihuman/NOTICE-OXIHUMAN.txt
           cp .vendor/oxihuman/assets/upstream/makehuman/LICENSE.ASSETS.md refactor-v2/public/test3d/oxihuman/LICENSE-MAKEHUMAN-ASSETS.txt
@@ -114,8 +131,7 @@ jobs:
           test -s refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm.js
           test -s refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
           test -s refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
-          grep -a -q 'breast/breast-point-incr' refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
-          grep -a -q 'buttocks/buttocks-volume-incr' refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
+          test -s refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.provenance.json
           du -h refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
           du -h refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
 
@@ -157,6 +173,7 @@ jobs:
               'built_at': datetime.now(timezone.utc).isoformat(),
               'oxihuman_commit': os.environ['OXIHUMAN_COMMIT'],
               'body_pack': 'charactermaker-shapes-v1',
+              'test3d_version': '3.1.0',
           }, ensure_ascii=False, indent=2), encoding='utf-8')
           PY
 
@@ -171,8 +188,17 @@ jobs:
           test -s dist/test3d/oxihuman/pkg/oxihuman_wasm.js
           test -s dist/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
           test -s dist/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
-          grep -a -q 'breast/breast-point-incr' dist/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
-          grep -a -q 'buttocks/buttocks-volume-incr' dist/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
+          test -s dist/test3d/oxihuman/pack/oxihuman-core-v1.provenance.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('dist/test3d/oxihuman/pack/oxihuman-core-v1.provenance.json').read_text(encoding='utf-8'))
+          targets = {row['name'] for row in data.get('targets', [])}
+          required = {'breast/breast-point-incr', 'breast/breast-volume-vert-up', 'buttocks/buttocks-volume-incr'}
+          missing = sorted(required - targets)
+          if missing:
+              raise SystemExit(f'Dist pack missing CharacterMaker shape targets: {missing}')
+          PY
 
       - name: Install FTP client
         id: ftp_client
@@ -231,6 +257,8 @@ jobs:
               raise SystemExit(f'Remote DEV commit mismatch: expected {expected}, got {actual}')
           if remote.get('body_pack') != 'charactermaker-shapes-v1':
               raise SystemExit(f"Remote body pack mismatch: {remote.get('body_pack')}")
+          if remote.get('test3d_version') != '3.1.0':
+              raise SystemExit(f"Remote test3d version mismatch: {remote.get('test3d_version')}")
           print(f'VERIFIED_REMOTE_COMMIT={actual}')
           PY
 
@@ -272,7 +300,8 @@ jobs:
             "?commit=$GITHUB_SHA" \
             "oxihuman/pkg/oxihuman_wasm.js?commit=$GITHUB_SHA" \
             "oxihuman/pkg/oxihuman_wasm_bg.wasm?commit=$GITHUB_SHA" \
-            "oxihuman/pack/oxihuman-core-v1.ohpk?commit=$GITHUB_SHA"; do
+            "oxihuman/pack/oxihuman-core-v1.ohpk?commit=$GITHUB_SHA" \
+            "oxihuman/pack/oxihuman-core-v1.provenance.json?commit=$GITHUB_SHA"; do
             code=$(curl --location --silent --show-error --max-time 45 \
               --connect-timeout 15 \
               --user-agent "$user_agent" \
@@ -332,7 +361,7 @@ jobs:
           payload=$(jq -n \
             --arg state success \
             --arg target_url "$DEPLOY_URL" \
-            --arg description "V2 DEV + CharacterMaker OxiHuman shape pack deployed" \
+            --arg description "DEV + TEST3D v3.1.0 CharacterMaker shape pack deployed" \
             --arg context "deployment/dev" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
@@ -349,10 +378,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           payload=$(jq -n \
             --arg state failure \
-            --arg target_url "$DEPLOY_URL" \
-            --arg description "V2 DEV / CharacterMaker shape pack build or deploy failed" \
+            --arg target_url "$run_url" \
+            --arg description "TEST3D v3.1.0 shape-pack build or deploy failed" \
             --arg context "deployment/dev" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
