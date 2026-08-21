@@ -1,7 +1,6 @@
-import { interpolate } from 'flubber';
 import paper from 'paper';
 import { svgPathProperties } from 'svg-path-properties';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 type PreviewMode = 'torso' | 'full';
 
@@ -16,20 +15,14 @@ type BodyParams = {
 };
 
 type Point = { x: number; y: number };
-
-type Measure = {
-  label: string;
-  value: number;
-  y: number;
-  x1: number;
-  x2: number;
-};
+type Measure = { label: string; value: number; y: number; x1: number; x2: number };
 
 const VIEW_WIDTH = 837.483;
 const VIEW_HEIGHT = 1819.369;
 const CENTER_X = VIEW_WIDTH / 2;
 const HEAD_END_Y = 330;
 const HIP_Y = 930;
+
 const BASE: BodyParams = {
   height: 170,
   weight: 60,
@@ -44,7 +37,6 @@ const paperScope = new paper.PaperScope();
 paperScope.setup(new paperScope.Size(VIEW_WIDTH, VIEW_HEIGHT));
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const gaussian = (value: number, center: number, width: number) => {
   const z = (value - center) / width;
   return Math.exp(-0.5 * z * z);
@@ -53,6 +45,7 @@ const smoothStep = (min: number, max: number, value: number) => {
   const t = clamp((value - min) / (max - min), 0, 1);
   return t * t * (3 - 2 * t);
 };
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 function calculateMetrics(params: BodyParams) {
   const heightM = params.height / 100;
@@ -85,162 +78,148 @@ function classifyFigure(params: BodyParams) {
   return ['Сбалансированная', 'Умеренный контраст талии и близкие пропорции верха и низа.'] as const;
 }
 
-function sampleSvgPath(pathData: string, count = 900): Point[] {
+function sampleSvgPath(pathData: string, count = 360): Point[] {
   const properties = new svgPathProperties(pathData);
   const total = properties.getTotalLength();
   const result: Point[] = [];
-
   for (let index = 0; index < count; index += 1) {
     const point = properties.getPointAtLength((total * index) / count);
     result.push({ x: point.x, y: point.y });
   }
-
   return result;
 }
 
 function verticalPosition(y: number, params: BodyParams) {
-  const heightDelta = (params.height - BASE.height) / BASE.height;
-  const torsoScale = clamp(1 + heightDelta * 0.2, 0.94, 1.08);
-  const legScale = clamp(1 + heightDelta * 0.48, 0.88, 1.16);
+  const delta = (params.height - BASE.height) / BASE.height;
+  const torsoScale = clamp(1 + delta * 0.32, 0.9, 1.13);
+  const legScale = clamp(1 + delta * 0.78, 0.78, 1.28);
 
   if (y <= HEAD_END_Y) return y;
-
   const transformedHip = HEAD_END_Y + (HIP_Y - HEAD_END_Y) * torsoScale;
-  if (y <= HIP_Y) {
-    return HEAD_END_Y + (y - HEAD_END_Y) * torsoScale;
-  }
-
+  if (y <= HIP_Y) return HEAD_END_Y + (y - HEAD_END_Y) * torsoScale;
   return transformedHip + (y - HIP_Y) * legScale;
 }
 
 function buildMorphGeometry(source: Point[], params: BodyParams): Point[] {
-  const current = calculateMetrics(params);
-  const base = calculateMetrics(BASE);
-  const bustRatio = current.bhr / base.bhr;
-  const waistRatio = current.whtr / base.whtr;
-  const hipRatio = current.hhr / base.hhr;
-  const bmiDelta = current.bmi - base.bmi;
-  const fatDelta = (params.bodyFat - BASE.bodyFat) / 20;
-  const muscleDelta = (params.muscle - BASE.muscle) / 2;
+  const metrics = calculateMetrics(params);
+  const baseMetrics = calculateMetrics(BASE);
 
-  const chestScale = clamp(1 + (bustRatio - 1) * 0.88 + muscleDelta * 0.025, 0.7, 1.48);
-  const waistScale = clamp(1 + (waistRatio - 1) * 0.92 + fatDelta * 0.025, 0.62, 1.52);
-  const hipScale = clamp(1 + (hipRatio - 1) * 0.92 + fatDelta * 0.035, 0.68, 1.52);
-  const shoulderScale = clamp(1 + (bustRatio - 1) * 0.18 + muscleDelta * 0.08, 0.86, 1.2);
-  const limbScale = clamp(1 + bmiDelta * 0.012 + fatDelta * 0.11 + muscleDelta * 0.075, 0.78, 1.3);
+  const bustDelta = params.bust - BASE.bust;
+  const waistDelta = params.waist - BASE.waist;
+  const hipsDelta = params.hips - BASE.hips;
+  const bmiDelta = metrics.bmi - baseMetrics.bmi;
+  const fatDelta = params.bodyFat - BASE.bodyFat;
+  const muscleDelta = params.muscle - BASE.muscle;
+
+  // Сантиметры должны быть заметны визуально. Рост влияет на вертикальные пропорции,
+  // но больше не гасит изменение обхватов.
+  const chestScale = clamp(1 + bustDelta * 0.008 + bmiDelta * 0.004 + muscleDelta * 0.025, 0.62, 1.58);
+  const waistScale = clamp(1 + waistDelta * 0.009 + bmiDelta * 0.006 + fatDelta * 0.003, 0.55, 1.68);
+  const hipScale = clamp(1 + hipsDelta * 0.0085 + bmiDelta * 0.004 + fatDelta * 0.0035, 0.6, 1.62);
+  const shoulderScale = clamp(1 + bustDelta * 0.0015 + muscleDelta * 0.05, 0.88, 1.18);
+  const limbScale = clamp(1 + bmiDelta * 0.008 + fatDelta * 0.004 + muscleDelta * 0.045, 0.82, 1.3);
 
   return source.map((point) => {
+    if (point.y < HEAD_END_Y) {
+      return { x: point.x, y: point.y };
+    }
+
     const dx = point.x - CENTER_X;
     const absDx = Math.abs(dx);
     const side = dx < 0 ? -1 : 1;
-    const shoulderWeight = gaussian(point.y, 410, 95);
-    const chestWeight = gaussian(point.y, 570, 145);
-    const waistWeight = gaussian(point.y, 760, 105);
-    const hipWeight = gaussian(point.y, 925, 165);
 
-    const localScale = 1
+    const shoulderWeight = gaussian(point.y, 410, 82);
+    const chestWeight = gaussian(point.y, 570, 112);
+    const waistWeight = gaussian(point.y, 755, 82);
+    const hipWeight = gaussian(point.y, 915, 125);
+
+    const weightedScale = 1
       + (shoulderScale - 1) * shoulderWeight
       + (chestScale - 1) * chestWeight
       + (waistScale - 1) * waistWeight
       + (hipScale - 1) * hipWeight;
 
-    let x: number;
+    let x = point.x;
 
-    if (point.y >= 980) {
-      const blend = smoothStep(980, 1120, point.y);
+    // Ноги: меняем толщину вокруг центра каждой ноги и расстояние между ногами.
+    if (point.y >= 990) {
+      const blend = smoothStep(990, 1120, point.y);
       const baseLegCenter = CENTER_X + side * 57;
-      const targetLegCenter = CENTER_X + side * 57 * clamp(hipScale, 0.82, 1.22);
-      const torsoX = CENTER_X + dx * hipScale;
+      const targetLegCenter = CENTER_X + side * 57 * clamp(hipScale, 0.78, 1.28);
+      const pelvisX = CENTER_X + dx * hipScale;
       const legX = targetLegCenter + (point.x - baseLegCenter) * limbScale;
-      x = lerp(torsoX, legX, blend);
-    } else if (point.y >= 345 && point.y <= 1020 && absDx > 155) {
-      const attachmentDelta = (localScale - 1) * 145 * side;
-      const armMassDelta = (limbScale - 1) * 10 * side;
-      x = point.x + attachmentDelta * 0.68 + armMassDelta;
-    } else if (point.y < 330) {
-      x = point.x;
-    } else {
-      x = CENTER_X + dx * localScale;
+      x = lerp(pelvisX, legX, blend);
+    }
+    // Руки не растягиваем вместе с торсом. Только сдвигаем наружу/внутрь и немного меняем массу.
+    else if (point.y >= 345 && point.y <= 1040 && absDx > 160) {
+      const torsoShift = (
+        (shoulderScale - 1) * shoulderWeight * 78
+        + (chestScale - 1) * chestWeight * 72
+        + (waistScale - 1) * waistWeight * 42
+        + (hipScale - 1) * hipWeight * 48
+      );
+      const armMass = (limbScale - 1) * 18;
+      x = point.x + side * (torsoShift + armMass);
+    }
+    // Сам корпус.
+    else {
+      x = CENTER_X + dx * weightedScale;
     }
 
-    return {
-      x,
-      y: verticalPosition(point.y, params),
-    };
+    return { x, y: verticalPosition(point.y, params) };
   });
 }
 
 function smoothPath(points: Point[]) {
+  if (!points.length) return '';
   const path = new paperScope.Path();
   path.closed = true;
-
-  for (const point of points) {
-    path.add(new paperScope.Point(point.x, point.y));
-  }
-
-  path.smooth({ type: 'catmull-rom', factor: 0.5 });
+  for (const point of points) path.add(new paperScope.Point(point.x, point.y));
+  path.simplify(1.1);
+  path.smooth({ type: 'catmull-rom', factor: 0.34 });
   const result = path.pathData;
   path.remove();
   return result;
 }
 
 function boundsOf(points: Point[]) {
-  if (points.length === 0) {
-    return { minX: 0, minY: 0, width: VIEW_WIDTH, height: VIEW_HEIGHT };
-  }
-
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-
+  if (!points.length) return { minX: 0, minY: 0, width: VIEW_WIDTH, height: VIEW_HEIGHT };
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
   for (const point of points) {
     minX = Math.min(minX, point.x);
     minY = Math.min(minY, point.y);
     maxX = Math.max(maxX, point.x);
     maxY = Math.max(maxY, point.y);
   }
-
   return { minX, minY, width: maxX - minX, height: maxY - minY };
 }
 
 function bodyWidthAt(points: Point[], y: number) {
-  const candidates = points.filter((point) => Math.abs(point.y - y) <= 12);
-  const left = candidates
-    .filter((point) => point.x < CENTER_X)
-    .sort((a, b) => b.x - a.x)[0];
-  const right = candidates
-    .filter((point) => point.x > CENTER_X)
-    .sort((a, b) => a.x - b.x)[0];
-
-  if (!left || !right) {
-    return { x1: CENTER_X - 90, x2: CENTER_X + 90 };
-  }
-
-  return { x1: left.x, x2: right.x };
+  const candidates = points.filter((point) => Math.abs(point.y - y) <= 16 && Math.abs(point.x - CENTER_X) < 190);
+  const left = candidates.filter((point) => point.x < CENTER_X).sort((a, b) => a.x - b.x)[0];
+  const right = candidates.filter((point) => point.x > CENTER_X).sort((a, b) => b.x - a.x)[0];
+  return {
+    x1: left?.x ?? CENTER_X - 95,
+    x2: right?.x ?? CENTER_X + 95,
+  };
 }
 
 function buildMeasures(points: Point[], params: BodyParams): Measure[] {
-  const definitions = [
+  const defs = [
     ['Грудь', params.bust, verticalPosition(570, params)],
-    ['Талия', params.waist, verticalPosition(760, params)],
-    ['Бедра', params.hips, verticalPosition(925, params)],
+    ['Талия', params.waist, verticalPosition(755, params)],
+    ['Бедра', params.hips, verticalPosition(915, params)],
   ] as const;
-
-  return definitions.map(([label, value, y]) => {
+  return defs.map(([label, value, y]) => {
     const width = bodyWidthAt(points, y);
     return { label, value, y, x1: width.x1, x2: width.x2 };
   });
 }
 
-function RangeControl({
-  label,
-  value,
-  min,
-  max,
-  unit,
-  onChange,
-}: {
+function RangeControl({ label, value, min, max, unit, onChange }: {
   label: string;
   value: number;
   min: number;
@@ -249,7 +228,6 @@ function RangeControl({
   onChange: (value: number) => void;
 }) {
   const apply = (raw: number) => onChange(clamp(raw, min, max));
-
   return (
     <div className="range-control">
       <div className="range-control__top">
@@ -257,22 +235,8 @@ function RangeControl({
         <strong className="range-control__value">{value} {unit}</strong>
       </div>
       <div className="range-control__row">
-        <input
-          aria-label={label}
-          type="range"
-          min={min}
-          max={max}
-          value={value}
-          onChange={(event) => apply(Number(event.target.value))}
-        />
-        <input
-          aria-label={`${label}, точное значение`}
-          type="number"
-          min={min}
-          max={max}
-          value={value}
-          onChange={(event) => apply(Number(event.target.value))}
-        />
+        <input aria-label={label} type="range" min={min} max={max} value={value} onChange={(e) => apply(Number(e.target.value))} />
+        <input aria-label={`${label}, точное значение`} type="number" min={min} max={max} value={value} onChange={(e) => apply(Number(e.target.value))} />
       </div>
     </div>
   );
@@ -282,16 +246,12 @@ export function BodyMorphTest() {
   const [params, setParams] = useState<BodyParams>(BASE);
   const [sourcePath, setSourcePath] = useState('');
   const [sourceError, setSourceError] = useState('');
-  const [displayPath, setDisplayPath] = useState('');
   const [previewMode, setPreviewMode] = useState<PreviewMode>('torso');
   const [showMeasures, setShowMeasures] = useState(true);
   const [showGhost, setShowGhost] = useState(false);
-  const displayPathRef = useRef('');
-  const animationRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-
     fetch('./female-body.svg')
       .then((response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -303,78 +263,25 @@ export function BodyMorphTest() {
         const path = documentNode.querySelector('path')?.getAttribute('d') ?? '';
         if (!path) throw new Error('В SVG не найден path');
         setSourcePath(path);
-        setDisplayPath(path);
-        displayPathRef.current = path;
       })
       .catch((error: unknown) => {
-        if (!cancelled) {
-          setSourceError(error instanceof Error ? error.message : 'Не удалось загрузить SVG');
-        }
+        if (!cancelled) setSourceError(error instanceof Error ? error.message : 'Не удалось загрузить SVG');
       });
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
-  const sourcePoints = useMemo(
-    () => (sourcePath ? sampleSvgPath(sourcePath) : []),
-    [sourcePath],
-  );
-
-  const morphedPoints = useMemo(
-    () => buildMorphGeometry(sourcePoints, params),
-    [sourcePoints, params],
-  );
-
-  const targetPath = useMemo(
-    () => (morphedPoints.length ? smoothPath(morphedPoints) : ''),
-    [morphedPoints],
-  );
-
-  useEffect(() => {
-    if (!targetPath) return undefined;
-
-    if (animationRef.current !== null) {
-      cancelAnimationFrame(animationRef.current);
-    }
-
-    const fromPath = displayPathRef.current || targetPath;
-    const morph = interpolate(fromPath, targetPath, { maxSegmentLength: 10 });
-    const duration = 140;
-    const startedAt = performance.now();
-
-    const tick = (now: number) => {
-      const progress = clamp((now - startedAt) / duration, 0, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const nextPath = morph(eased);
-      displayPathRef.current = nextPath;
-      setDisplayPath(nextPath);
-
-      if (progress < 1) {
-        animationRef.current = requestAnimationFrame(tick);
-      } else {
-        animationRef.current = null;
-      }
-    };
-
-    animationRef.current = requestAnimationFrame(tick);
-
-    return () => {
-      if (animationRef.current !== null) {
-        cancelAnimationFrame(animationRef.current);
-        animationRef.current = null;
-      }
-    };
-  }, [targetPath]);
-
-  const metrics = calculateMetrics(params);
-  const [figureType, figureDescription] = classifyFigure(params);
+  const sourcePoints = useMemo(() => sourcePath ? sampleSvgPath(sourcePath) : [], [sourcePath]);
+  const morphedPoints = useMemo(() => buildMorphGeometry(sourcePoints, params), [sourcePoints, params]);
+  const targetPath = useMemo(() => smoothPath(morphedPoints), [morphedPoints]);
+  const metrics = useMemo(() => calculateMetrics(params), [params]);
+  const [figureType, figureDescription] = useMemo(() => classifyFigure(params), [params]);
   const measures = useMemo(() => buildMeasures(morphedPoints, params), [morphedPoints, params]);
   const bounds = useMemo(() => boundsOf(morphedPoints), [morphedPoints]);
 
-  const fullViewBox = `${bounds.minX - 28} ${bounds.minY - 28} ${bounds.width + 56} ${bounds.height + 56}`;
-  const torsoViewBox = `95 ${verticalPosition(300, params)} 647 ${verticalPosition(1035, params) - verticalPosition(300, params)}`;
+  const fullViewBox = `${bounds.minX - 30} ${bounds.minY - 30} ${bounds.width + 60} ${bounds.height + 60}`;
+  const torsoTop = verticalPosition(300, params);
+  const torsoBottom = verticalPosition(1040, params);
+  const torsoViewBox = `95 ${torsoTop} 647 ${Math.max(620, torsoBottom - torsoTop)}`;
   const viewBox = previewMode === 'torso' ? torsoViewBox : fullViewBox;
 
   const setNumeric = (key: keyof Omit<BodyParams, 'muscle'>, value: number) => {
@@ -385,11 +292,8 @@ export function BodyMorphTest() {
     <main className="body-lab">
       <header className="body-lab__header">
         <div>
-          <h1>2D Body Lab - library morph</h1>
-          <p>
-            React/Vite тест CharacterMaker. Контур берется из женского SVG, измеряется через svg-path-properties,
-            перестраивается через Paper.js и плавно морфится через Flubber.
-          </p>
+          <h1>2D Body Lab - fast morph</h1>
+          <p>Облегченная версия без Flubber-анимации во время движения ползунка. Обхваты теперь меняют соответствующие зоны напрямую и заметно.</p>
         </div>
         <div className="body-lab__badge">/dev/test</div>
       </header>
@@ -397,31 +301,23 @@ export function BodyMorphTest() {
       <div className="body-lab__layout">
         <section className="lab-card controls-card">
           <h2 className="section-title">Параметры тела</h2>
-          <p className="section-sub">Обхваты являются основными управляющими параметрами контура.</p>
+          <p className="section-sub">Двигайте грудь, талию и бедра - контур должен реагировать сразу, без анимационной задержки.</p>
 
           <div className="control-group">
             <h3 className="control-group__title">Обхваты</h3>
-            <RangeControl label="Грудь" value={params.bust} min={70} max={140} unit="см" onChange={(value) => setNumeric('bust', value)} />
-            <RangeControl label="Талия" value={params.waist} min={50} max={120} unit="см" onChange={(value) => setNumeric('waist', value)} />
-            <RangeControl label="Бедра" value={params.hips} min={70} max={140} unit="см" onChange={(value) => setNumeric('hips', value)} />
+            <RangeControl label="Обхват груди" value={params.bust} min={70} max={140} unit="см" onChange={(v) => setNumeric('bust', v)} />
+            <RangeControl label="Обхват талии" value={params.waist} min={50} max={120} unit="см" onChange={(v) => setNumeric('waist', v)} />
+            <RangeControl label="Обхват бедер" value={params.hips} min={70} max={140} unit="см" onChange={(v) => setNumeric('hips', v)} />
           </div>
 
           <div className="control-group">
             <h3 className="control-group__title">Габариты</h3>
-            <RangeControl label="Рост" value={params.height} min={140} max={220} unit="см" onChange={(value) => setNumeric('height', value)} />
-            <RangeControl label="Вес" value={params.weight} min={40} max={150} unit="кг" onChange={(value) => setNumeric('weight', value)} />
-          </div>
-
-          <div className="control-group">
-            <h3 className="control-group__title">Композиция</h3>
-            <RangeControl label="Процент жира" value={params.bodyFat} min={8} max={45} unit="%" onChange={(value) => setNumeric('bodyFat', value)} />
+            <RangeControl label="Рост" value={params.height} min={140} max={220} unit="см" onChange={(v) => setNumeric('height', v)} />
+            <RangeControl label="Вес" value={params.weight} min={40} max={150} unit="кг" onChange={(v) => setNumeric('weight', v)} />
+            <RangeControl label="Процент жира" value={params.bodyFat} min={8} max={45} unit="%" onChange={(v) => setNumeric('bodyFat', v)} />
             <div className="select-control">
               <label htmlFor="muscle">Мышечная масса</label>
-              <select
-                id="muscle"
-                value={params.muscle}
-                onChange={(event) => setParams((current) => ({ ...current, muscle: Number(event.target.value) }))}
-              >
+              <select id="muscle" value={params.muscle} onChange={(e) => setParams((current) => ({ ...current, muscle: Number(e.target.value) }))}>
                 <option value={0}>Мягкая</option>
                 <option value={1}>Тонизированная</option>
                 <option value={2}>Атлетическая</option>
@@ -431,77 +327,61 @@ export function BodyMorphTest() {
           </div>
 
           <details className="metrics-disclosure">
-            <summary>Расчетные коэффициенты и тип фигуры</summary>
+            <summary>Расчетные коэффициенты</summary>
             <div className="metrics-grid">
               <div className="metric"><span>BMI</span><strong>{metrics.bmi.toFixed(1)}</strong></div>
               <div className="metric"><span>Талия / рост</span><strong>{metrics.whtr.toFixed(3)}</strong></div>
               <div className="metric"><span>Талия / бедра</span><strong>{metrics.whr.toFixed(3)}</strong></div>
               <div className="metric"><span>Грудь / талия</span><strong>{metrics.bwr.toFixed(2)}</strong></div>
+              <div className="metric"><span>Грудь / рост</span><strong>{metrics.bhr.toFixed(3)}</strong></div>
               <div className="metric"><span>Бедра / рост</span><strong>{metrics.hhr.toFixed(3)}</strong></div>
-              <div className="metric"><span>Тип</span><strong>{figureType}</strong></div>
             </div>
           </details>
 
-          <button className="reset-button" type="button" onClick={() => setParams(BASE)}>
-            Сбросить к 170 / 60 / 90-65-95
-          </button>
+          <button className="reset-button" type="button" onClick={() => setParams(BASE)}>Сбросить к 170 / 60 / 90-65-95</button>
         </section>
 
         <section className="lab-card preview-card">
           <div className="preview-head">
             <div className="preview-head__copy">
               <h2 className="section-title">Живой силуэт</h2>
-              <p className="section-sub">На телефоне сначала показывается крупный корпус, чтобы изменения были видны сразу.</p>
+              <p className="section-sub">Paper.js сглаживает только итоговый контур. Во время drag нет покадрового morph-движка.</p>
             </div>
             <div className="preview-toolbar">
-              <div className="segmented" aria-label="Область просмотра">
-                <button className={previewMode === 'torso' ? 'is-active' : ''} type="button" onClick={() => setPreviewMode('torso')}>Корпус</button>
-                <button className={previewMode === 'full' ? 'is-active' : ''} type="button" onClick={() => setPreviewMode('full')}>Весь рост</button>
+              <div className="segmented">
+                <button type="button" className={previewMode === 'torso' ? 'is-active' : ''} onClick={() => setPreviewMode('torso')}>Корпус</button>
+                <button type="button" className={previewMode === 'full' ? 'is-active' : ''} onClick={() => setPreviewMode('full')}>Весь рост</button>
               </div>
-              <button className={`tool-button ${showMeasures ? 'is-active' : ''}`} type="button" onClick={() => setShowMeasures((value) => !value)}>Мерки</button>
-              <button className={`tool-button ${showGhost ? 'is-active' : ''}`} type="button" onClick={() => setShowGhost((value) => !value)}>Сравнение</button>
+              <button className={`tool-button ${showMeasures ? 'is-active' : ''}`} type="button" onClick={() => setShowMeasures((v) => !v)}>Мерки</button>
+              <button className={`tool-button ${showGhost ? 'is-active' : ''}`} type="button" onClick={() => setShowGhost((v) => !v)}>Сравнение</button>
             </div>
           </div>
 
           <div className="stage">
-            {sourceError ? (
-              <div className="loading-state">Ошибка SVG: {sourceError}</div>
-            ) : !displayPath ? (
-              <div className="loading-state">Загрузка 2D-контура...</div>
-            ) : (
-              <svg viewBox={viewBox} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Параметрический женский силуэт">
+            {sourceError ? <div className="loading-state">Ошибка SVG: {sourceError}</div> : !targetPath ? <div className="loading-state">Загрузка контура...</div> : (
+              <svg viewBox={viewBox} role="img" aria-label="Параметрический женский силуэт">
                 {showGhost && <path className="ghost-path" d={sourcePath} />}
-                <path className="body-path" d={displayPath} />
-
+                <path className="body-path" d={targetPath} />
                 {showMeasures && measures.map((measure) => (
                   <g key={measure.label}>
-                    <line className="measure-line" x1={measure.x1 - 8} x2={measure.x2 + 8} y1={measure.y} y2={measure.y} />
-                    <text className="measure-text" x={measure.x2 + 18} y={measure.y + 8}>{measure.label} {measure.value} см</text>
+                    <line className="measure-line" x1={measure.x1} x2={measure.x2} y1={measure.y} y2={measure.y} />
+                    <text className="measure-text" x={Math.min(measure.x2 + 18, CENTER_X + 220)} y={measure.y + 8}>{measure.label} {measure.value} см</text>
                   </g>
                 ))}
-
-                {showMeasures && previewMode === 'full' && (
-                  <g>
-                    <line className="height-line" x1={bounds.minX - 18} x2={bounds.minX - 18} y1={bounds.minY} y2={bounds.minY + bounds.height} />
-                    <text className="measure-text" x={bounds.minX - 30} y={bounds.minY + bounds.height / 2} transform={`rotate(-90 ${bounds.minX - 30} ${bounds.minY + bounds.height / 2})`}>
-                      Рост {params.height} см
-                    </text>
-                  </g>
-                )}
               </svg>
             )}
           </div>
 
           <div className="preview-summary">
             <div className="summary-box">
-              <span>Расчетный тип</span>
+              <span>Расчетный тип фигуры</span>
               <strong>{figureType}</strong>
               <p>{figureDescription}</p>
             </div>
             <div className="summary-box">
               <span>Текущие параметры</span>
               <strong>{params.height} см · {params.weight} кг · {params.bust}-{params.waist}-{params.hips}</strong>
-              <p>Жир {params.bodyFat}% · мышцы {['мягкая', 'тонизированная', 'атлетическая', 'мускулистая'][params.muscle]}</p>
+              <p>Жир: {params.bodyFat}% · мышцы: {['мягкая', 'тонизированная', 'атлетическая', 'мускулистая'][params.muscle]}</p>
             </div>
           </div>
         </section>
