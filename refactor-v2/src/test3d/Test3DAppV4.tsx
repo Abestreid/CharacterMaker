@@ -16,6 +16,8 @@ import {
 } from '../domain/catalog/character/body';
 import {
   CharacterBodyEngine,
+  parseBodyPackage,
+  serializeBodyPackage,
   type BodyParams,
   type CameraView,
   type CharacterBodyFitResult,
@@ -103,6 +105,7 @@ function NumericControl(props: { control: ControlSpec; value: number; onChange: 
 export function Test3DAppV4() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<CharacterBodyEngine | null>(null);
+  const packageInputRef = useRef<HTMLInputElement | null>(null);
   const latestRef = useRef<BodyParams>(DEFAULTS);
   const fitTimerRef = useRef<number | null>(null);
   const fitRunningRef = useRef(false);
@@ -115,6 +118,7 @@ export function Test3DAppV4() {
   const [ready, setReady] = useState(false);
   const [engineError, setEngineError] = useState<string | null>(null);
   const [fitError, setFitError] = useState<string | null>(null);
+  const [packageError, setPackageError] = useState<string | null>(null);
   const [fitState, setFitState] = useState<'idle' | 'pending' | 'fitting' | 'ready' | 'error'>('idle');
   const [fitResult, setFitResult] = useState<CharacterBodyFitResult | null>(null);
   const [loadProgress, setLoadProgress] = useState<OxiLoadProgress>({ phase: 'wasm', progress: 0, label: 'Запускаю CharacterBody Engine' });
@@ -151,6 +155,32 @@ export function Test3DAppV4() {
       setFitState('error');
     } finally {
       fitRunningRef.current = false;
+    }
+  };
+
+  const exportPackage = () => {
+    setPackageError(null);
+    const blob = new Blob([serializeBodyPackage(params)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `charactermaker-body-${params.height}-${params.bust}-${params.waist}-${params.hips}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const importPackage = async (file: File | undefined) => {
+    if (!file) return;
+    setPackageError(null);
+    try {
+      const bodyPackage = parseBodyPackage(await file.text());
+      setParams(bodyPackage.params);
+      setFitResult(null);
+      setFitState('pending');
+    } catch (error) {
+      setPackageError(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -284,6 +314,22 @@ export function Test3DAppV4() {
             <div><h2>Параметры CharacterMaker</h2><p>{params.height} см · {params.weight} кг · {params.bust}-{params.waist}-{params.hips}</p></div>
             <button type="button" className="lab3d-reset" onClick={() => setParams(DEFAULTS)}>Сбросить</button>
           </div>
+
+          <div className="lab3d-toolbar-toggles" aria-label="Пакет CharacterBody">
+            <button type="button" onClick={exportPackage}>Экспорт JSON</button>
+            <button type="button" onClick={() => packageInputRef.current?.click()}>Импорт JSON</button>
+            <input
+              ref={packageInputRef}
+              hidden
+              type="file"
+              accept="application/json,.json"
+              onChange={(event) => {
+                const input = event.currentTarget;
+                void importPackage(input.files?.[0]).finally(() => { input.value = ''; });
+              }}
+            />
+          </div>
+          {packageError ? <div className="lab3d-error"><strong>Пакет не импортирован</strong><span>{packageError}</span></div> : null}
 
           <div className="lab3d-gender">
             <button type="button" className={params.gender === 'female' ? 'active' : ''} onClick={() => setParams((current) => ({ ...current, gender: 'female', breastSizeId: current.breastSizeId ?? 'medium', breastShapeId: current.breastShapeId ?? 'teardrop', breastFirmnessId: current.breastFirmnessId ?? 'natural' }))}>Женский</button>
