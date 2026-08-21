@@ -28,6 +28,58 @@
   font-variant-numeric: tabular-nums;
 }
 
+.lab3d-breast-card {
+  display: grid;
+  gap: 13px;
+  margin: 0 0 18px;
+  padding: 14px;
+  border: 1px solid rgba(139, 92, 246, .42);
+  border-radius: 15px;
+  background: linear-gradient(180deg, rgba(139, 92, 246, .12), rgba(24, 24, 27, .52));
+}
+
+.lab3d-breast-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.lab3d-breast-head h3 {
+  margin: 0;
+  color: #ede9fe;
+  font-size: 13px;
+}
+
+.lab3d-breast-head p {
+  margin: 5px 0 0;
+  color: #a1a1aa;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.lab3d-breast-head > span {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid rgba(167, 139, 250, .38);
+  border-radius: 999px;
+  background: rgba(139, 92, 246, .14);
+  color: #ddd6fe;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.lab3d-breast-selects {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.lab3d-body-controls {
+  padding-top: 2px;
+}
+
 .lab3d-shape-section {
   display: grid;
   gap: 10px;
@@ -86,6 +138,20 @@
 
   .lab3d-release-strip::-webkit-scrollbar { display: none; }
 
+  .lab3d-breast-card {
+    margin-bottom: 15px;
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .lab3d-breast-head {
+    align-items: center;
+  }
+
+  .lab3d-breast-head p {
+    max-width: 230px;
+  }
+
   .lab3d-shape-section {
     margin-top: 14px;
     padding-top: 13px;
@@ -93,6 +159,10 @@
 
   .lab3d-select-row {
     grid-template-columns: 105px minmax(0, 1fr);
+  }
+
+  .lab3d-breast-selects .lab3d-select-row {
+    grid-template-columns: 112px minmax(0, 1fr);
   }
 
   .lab3d-select-row select {
