@@ -10,6 +10,7 @@ export default defineConfig({
       input: {
         main: 'index.html',
         bodyTest: 'test/index.html',
+        bodyTest3d: 'test3d/index.html',
       },
     },
   },
