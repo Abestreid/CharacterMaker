@@ -6,6 +6,7 @@ on:
       - refactor/domain-catalog-v2
     paths:
       - 'refactor-v2/scripts/patch_oxihuman_charactermaker.py'
+      - 'refactor-v2/scripts/validate_charactermaker_body_pack.py'
       - 'refactor-v2/src/lib/body3d/**'
       - '.github/workflows/check-charactermaker-shape-pack.yml'
   workflow_dispatch:
@@ -33,13 +34,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Patch runtime and build CharacterMaker OHPK
+      - name: Patch runtime and build CharacterBody v4 OHPK
         run: |
           set -euxo pipefail
           python3 refactor-v2/scripts/patch_oxihuman_charactermaker.py .vendor/oxihuman
           cd .vendor/oxihuman
 
-          # Lock the restored macro blend mathematically before packaging data.
+          # Lock cup and firmness as independent macro dimensions in WASM.
           cargo test -p oxihuman-wasm charactermaker_breast_macro_tests -- --nocapture
 
           scripts/fetch_upstream_assets.sh
@@ -49,43 +50,8 @@ jobs:
             --budget-gzip-bytes 12582912
           test -s assets/packs/oxihuman-core-v1.ohpk
           test -s assets/packs/oxihuman-core-v1.provenance.json
-
-          python3 - <<'PY'
-          import json
-          p='assets/packs/oxihuman-core-v1.provenance.json'
-          d=json.load(open(p, encoding='utf-8'))
-          rows=d.get('targets', [])
-          names={x['name'] for x in rows}
-          details={x['name'] for x in rows if x.get('category') == 'charactermaker_shape'}
-          breast=[x['name'] for x in rows if x.get('category') == 'charactermaker_breast_macro']
-
-          required={
-              'breast/breast-point-incr',
-              'breast/breast-volume-vert-up',
-              'buttocks/buttocks-volume-incr',
-              'hip/hip-scale-depth-incr',
-              'breast/female-young-averagemuscle-averageweight-mincup-averagefirmness',
-              'breast/female-young-averagemuscle-averageweight-averagecup-averagefirmness',
-              'breast/female-young-averagemuscle-averageweight-maxcup-averagefirmness',
-              'breast/female-young-averagemuscle-averageweight-averagecup-minfirmness',
-              'breast/female-young-averagemuscle-averageweight-averagecup-maxfirmness',
-          }
-          missing=sorted(required - names)
-          if missing:
-              raise SystemExit(f'Missing CharacterMaker body targets: {missing}')
-          if len(details) < 16:
-              raise SystemExit(f'Expected >=16 direct shape targets, got {len(details)}')
-          # 2 adult ages * 3 muscle * 3 weight * 3 cup * 3 firmness.
-          if len(breast) < 162:
-              raise SystemExit(f'Expected 162 adult female breast macro corners, got {len(breast)}')
-          if any('child' in n or 'baby' in n for n in breast):
-              raise SystemExit('Non-adult breast macro leaked into CharacterMaker pack')
-          if any(token in n for n in names for token in ('nipple', 'areola', 'genital', 'penis', 'vagina')):
-              raise SystemExit('Explicit anatomy target leaked into CharacterMaker pack')
-          print('DIRECT_SHAPE_TARGETS=', len(details))
-          print('BREAST_MACRO_TARGETS=', len(breast))
-          print('TOTAL_TARGETS=', len(names))
-          PY
+          python3 ../../refactor-v2/scripts/validate_charactermaker_body_pack.py \
+            assets/packs/oxihuman-core-v1.provenance.json
 
       - name: Mark success
         if: success()
@@ -96,7 +62,7 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "{\"state\":\"success\",\"target_url\":\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\",\"description\":\"CharacterBody pack contains cup/firmness macro lattice\",\"context\":\"diagnostic/shape-pack\"}" >/dev/null
+            -d "{\"state\":\"success\",\"target_url\":\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\",\"description\":\"CharacterBody v4 pack: 162 breast macro corners verified\",\"context\":\"diagnostic/shape-pack\"}" >/dev/null
 
       - name: Mark failure
         if: failure()
@@ -107,4 +73,4 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "{\"state\":\"failure\",\"target_url\":\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\",\"description\":\"CharacterBody macro pack build failed\",\"context\":\"diagnostic/shape-pack\"}" >/dev/null
+            -d "{\"state\":\"failure\",\"target_url\":\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\",\"description\":\"CharacterBody v4 macro pack build failed\",\"context\":\"diagnostic/shape-pack\"}" >/dev/null
