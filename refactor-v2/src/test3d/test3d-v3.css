@@ -1,0 +1,62 @@
+.lab3d-shape-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 15px;
+  border-top: 1px solid #27272a;
+}
+
+.lab3d-shape-section h3 {
+  margin: 0 0 2px;
+  color: #d4d4d8;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.lab3d-select-row {
+  display: grid;
+  grid-template-columns: minmax(100px, .8fr) minmax(0, 1.4fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.lab3d-select-row > span {
+  color: #a1a1aa;
+  font-size: 11px;
+}
+
+.lab3d-select-row select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #303036;
+  background: #18181b;
+  color: #f4f4f5;
+  border-radius: 10px;
+  padding: 8px 34px 8px 10px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  color-scheme: dark;
+}
+
+.lab3d-select-row select:focus {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, .12);
+}
+
+@media (max-width: 560px) {
+  .lab3d-shape-section {
+    margin-top: 14px;
+    padding-top: 13px;
+  }
+
+  .lab3d-select-row {
+    grid-template-columns: 105px minmax(0, 1fr);
+  }
+
+  .lab3d-select-row select {
+    min-height: 46px;
+    font-size: 13px;
+  }
+}
