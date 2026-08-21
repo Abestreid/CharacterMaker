@@ -68,7 +68,7 @@ def main() -> None:
         '    // Adult-neutral waist / hip shaping polish (dropped first under budget): 8.\n',
         '    // CharacterMaker shape morphs are essential for the 3D body preview.\n'
         '    for n in CHARACTERMAKER_SHAPE_TARGETS {\n'
-        '        if !names.iter().any(|existing| existing == n) {\n'
+        '        if !names.iter().any(|existing| existing.as_str() == *n) {\n'
         '            names.push((*n).to_string());\n'
         '        }\n'
         '    }\n\n'
