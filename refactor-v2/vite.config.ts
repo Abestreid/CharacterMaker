@@ -5,4 +5,12 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: './',
   plugins: [react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        bodyTest: 'test/index.html',
+      },
+    },
+  },
 });
