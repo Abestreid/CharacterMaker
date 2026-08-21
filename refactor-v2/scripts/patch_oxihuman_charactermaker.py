@@ -9,6 +9,10 @@ CC0 MakeHuman breast macro system that stock OxiHuman intentionally omits:
 - adult female breast corner targets blended by age/muscle/weight/cup/firmness
 - selected non-explicit breast/buttock/hip detail morphs for categorical shapes
 
+MakeHuman does not ship an averagecup+averagefirmness target: that neutral
+combination is the zero-delta base mesh. Therefore the adult female lattice has
+144 authored target files, not 162 (18 neutral base corners are implicit).
+
 Explicit genital/nipple/areola morphs stay excluded. The patch is deliberately
 anchor-based and fails loudly if the pinned OxiHuman source changes.
 """
@@ -68,17 +72,22 @@ def patch_pack_builder(root: Path) -> None:
         "core priority",
     )
 
-    # Insert all adult female breast macro corners into the core name list.
-    # 2 ages * 3 muscle * 3 weight * 3 cup * 3 firmness = 162 targets.
+    # MakeHuman authors every adult female cup/firmness corner except
+    # averagecup+averagefirmness. That neutral-neutral combination is the base
+    # mesh (zero delta): 2*3*3*(3*3 - 1) = 144 actual target files.
     text = replace_once(
         text,
         '    // Adult-neutral waist / hip shaping polish (dropped first under budget): 8.\n',
-        '    // CharacterMaker breast macro lattice (adult female only): 162 corners.\n'
+        '    // CharacterMaker breast macro lattice (adult female only): 144 authored corners.\n'
+        '    // averagecup+averagefirmness is the implicit zero-delta base mesh.\n'
         '    for a in ["young", "old"] {\n'
         '        for m in ["minmuscle", "averagemuscle", "maxmuscle"] {\n'
         '            for w in ["minweight", "averageweight", "maxweight"] {\n'
         '                for c in ["mincup", "averagecup", "maxcup"] {\n'
         '                    for f in ["minfirmness", "averagefirmness", "maxfirmness"] {\n'
+        '                        if c == "averagecup" && f == "averagefirmness" {\n'
+        '                            continue;\n'
+        '                        }\n'
         '                        names.push(format!("breast/female-{a}-{m}-{w}-{c}-{f}"));\n'
         '                    }\n'
         '                }\n'
@@ -131,7 +140,7 @@ def patch_wasm_runtime(root: Path) -> None:
     helper_replacement = helper_anchor + '''\n/// Read a CharacterMaker macro slider from ParamState.extra.\nfn extra_slider(p: &ParamState, key: &str, default: f32) -> f32 {\n    p.extra.get(key).copied().unwrap_or(default).clamp(0.0, 1.0)\n}\n'''
     text = replace_once(text, helper_anchor, helper_replacement, "extra slider helper")
 
-    breast_block = '''\n    // CharacterMaker / MakeHuman breast macro lattice. These targets are named\n    // `breast/female-{age}-{muscle}-{weight}-{cup}-{firmness}` and must be\n    // blended as a six-dimensional partition of unity. Treating them as the\n    // generic `breast` category (stock OxiHuman behaviour) makes breast size\n    // follow body weight and is the reason the UI used to appear ineffective.\n    if basename.contains("cup") && basename.contains("firmness") {\n        let muscle = detect_level(&basename, "muscle");\n        let weight = detect_level(&basename, "weight");\n        let cup = detect_level(&basename, "cup");\n        let firmness = detect_level(&basename, "firmness");\n        if let (Some(ml), Some(wl), Some(cl), Some(fl)) = (muscle, weight, cup, firmness) {\n            return Some(Box::new(move |p: &ParamState| {\n                gender_term(p)\n                    * age_term(p)\n                    * macro_level_weight(ml, p.muscle)\n                    * macro_level_weight(wl, p.weight)\n                    * macro_level_weight(cl, extra_slider(p, "cupsize", 0.5))\n                    * macro_level_weight(fl, extra_slider(p, "breast_firmness", 0.5))\n            }));\n        }\n    }\n\n'''
+    breast_block = '''\n    // CharacterMaker / MakeHuman breast macro lattice. These targets are named\n    // `breast/female-{age}-{muscle}-{weight}-{cup}-{firmness}` and are blended\n    // as a six-dimensional partition. The averagecup+averagefirmness corner is\n    // intentionally absent upstream: its zero delta is represented by the base\n    // mesh, so the missing coefficient naturally contributes no displacement.\n    // Treating the remaining corners as the generic `breast` category (stock\n    // OxiHuman behaviour) would make breast size follow body weight.\n    if basename.contains("cup") && basename.contains("firmness") {\n        let muscle = detect_level(&basename, "muscle");\n        let weight = detect_level(&basename, "weight");\n        let cup = detect_level(&basename, "cup");\n        let firmness = detect_level(&basename, "firmness");\n        if let (Some(ml), Some(wl), Some(cl), Some(fl)) = (muscle, weight, cup, firmness) {\n            return Some(Box::new(move |p: &ParamState| {\n                gender_term(p)\n                    * age_term(p)\n                    * macro_level_weight(ml, p.muscle)\n                    * macro_level_weight(wl, p.weight)\n                    * macro_level_weight(cl, extra_slider(p, "cupsize", 0.5))\n                    * macro_level_weight(fl, extra_slider(p, "breast_firmness", 0.5))\n            }));\n        }\n    }\n\n'''
     text = replace_once(
         text,
         '    // Universal body corner targets.\n',
@@ -159,7 +168,7 @@ def main() -> None:
     print("Direct detail targets:")
     for target in DETAIL_TARGETS:
         print(f"  - {target}")
-    print("Breast macro axes: cupsize + breast_firmness")
+    print("Breast macro axes: cupsize + breast_firmness (144 authored corners + implicit neutral base)")
 
 
 if __name__ == "__main__":
