@@ -1,0 +1,117 @@
+name: Mobile Test Probe Throttled
+
+on:
+  push:
+    branches:
+      - refactor/domain-catalog-v2
+    paths:
+      - '.github/workflows/mobile-test-probe-throttled.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+env:
+  TARGET_URL: https://charmaker.free.nf/dev/test/
+
+jobs:
+  pixel5-throttled:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Mark pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n --arg state pending --arg target_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --arg description "Pixel5 4x CPU probe running" --arg context "probe/mobile-test-4x" '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "$payload" >/dev/null
+
+      - name: Install Selenium
+        run: python3 -m pip install --quiet selenium
+
+      - name: Probe public test with 4x CPU throttling
+        run: |
+          python3 - <<'PY'
+          import json, os, time
+          from selenium import webdriver
+          from selenium.webdriver.common.by import By
+          from selenium.webdriver.chrome.options import Options
+          from selenium.webdriver.support.ui import WebDriverWait
+          from selenium.webdriver.support import expected_conditions as EC
+
+          opts=Options()
+          opts.add_argument('--headless=new')
+          opts.add_argument('--no-sandbox')
+          opts.add_argument('--disable-dev-shm-usage')
+          opts.add_experimental_option('mobileEmulation', {
+            'deviceMetrics': {'width':393,'height':851,'pixelRatio':2.75,'touch':True,'mobile':True},
+            'userAgent':'Mozilla/5.0 (Linux; Android 14; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36'
+          })
+          d=webdriver.Chrome(options=opts)
+          result={}
+          try:
+            d.execute_cdp_cmd('Emulation.setCPUThrottlingRate', {'rate':4})
+            d.get(os.environ['TARGET_URL']+'?probe4x='+os.environ['GITHUB_SHA'])
+            wait=WebDriverWait(d,30)
+            slider=wait.until(EC.presence_of_element_located((By.CSS_SELECTOR,'input[data-body-range="Обхват груди"]')))
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR,'path.body-path')))
+            time.sleep(.8)
+            d.execute_script("window.__lt=[];try{window.__po=new PerformanceObserver(l=>l.getEntries().forEach(e=>window.__lt.push(e.duration)));window.__po.observe({entryTypes:['longtask']})}catch(e){}")
+            initial=float(slider.get_attribute('value'))
+            initial_path=d.find_element(By.CSS_SELECTOR,'path.body-path').get_attribute('d')
+            r=d.execute_script('const r=arguments[0].getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height}',slider)
+            minv=float(slider.get_attribute('min')); maxv=float(slider.get_attribute('max'))
+            sx=r['x']+r['w']*((initial-minv)/(maxv-minv)); sy=r['y']+r['h']/2; tx=r['x']+r['w']*.88
+            t0=time.perf_counter()
+            d.execute_cdp_cmd('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':sx,'y':sy,'id':1,'force':1}]})
+            for i in range(1,13):
+              x=sx+(tx-sx)*i/12
+              d.execute_cdp_cmd('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[{'x':x,'y':sy,'id':1,'force':1}]})
+              time.sleep(.02)
+            d.execute_cdp_cmd('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
+            time.sleep(.4)
+            drag_ms=(time.perf_counter()-t0)*1000
+            moved=float(slider.get_attribute('value'))
+            moved_path=d.find_element(By.CSS_SELECTOR,'path.body-path').get_attribute('d')
+            d.execute_script('window.scrollTo(0,0)'); time.sleep(.1)
+            d.execute_cdp_cmd('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':375,'y':760,'id':2,'force':1}]})
+            for i in range(1,13):
+              y=760-520*i/12
+              d.execute_cdp_cmd('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[{'x':375,'y':y,'id':2,'force':1}]})
+              time.sleep(.02)
+            d.execute_cdp_cmd('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
+            time.sleep(.5)
+            scroll=float(d.execute_script('return scrollY'))
+            lt=d.execute_script('return window.__lt||[]')
+            result={'initial':initial,'moved':moved,'delta':moved-initial,'path_changed':moved_path!=initial_path,'scroll_y':scroll,'drag_ms':round(drag_ms,1),'long_tasks_count':len(lt),'max_long_task_ms':round(max(lt) if lt else 0,1)}
+            print(json.dumps(result,indent=2))
+            assert abs(moved-initial)>=5
+            assert moved_path!=initial_path
+            assert scroll>=120
+          finally:
+            open('/tmp/probe4x.json','w').write(json.dumps(result))
+            d.quit()
+          PY
+
+      - name: Mark success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          desc=$(python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/probe4x.json'))
+          print(f"4x CPU slider {d['initial']:.0f}->{d['moved']:.0f}; scroll {d['scroll_y']:.0f}px; long {d['max_long_task_ms']:.0f}ms")
+          PY
+          )
+          payload=$(jq -n --arg state success --arg target_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --arg description "$desc" --arg context "probe/mobile-test-4x" '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "$payload" >/dev/null
+
+      - name: Mark failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n --arg state failure --arg target_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --arg description "Pixel5 4x CPU probe failed" --arg context "probe/mobile-test-4x" '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "$payload" >/dev/null
