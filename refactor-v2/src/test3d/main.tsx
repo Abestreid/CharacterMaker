@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Test3DApp } from './Test3DApp';
+import { Test3DAppV2 } from './Test3DAppV2';
 
 const root = document.getElementById('body-test3d-root');
 
@@ -10,6 +10,6 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    <Test3DApp />
+    <Test3DAppV2 />
   </StrictMode>,
 );
