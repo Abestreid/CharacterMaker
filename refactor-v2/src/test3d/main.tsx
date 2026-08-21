@@ -1,9 +1,9 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Test3DAppV3 } from './Test3DAppV3';
+import { Test3DAppV4 } from './Test3DAppV4';
 import './test3d-v3.css';
 
-const TEST3D_VERSION = '3.1.0';
+const TEST3D_VERSION = '4.0.0';
 const BUILD_SHA = (import.meta.env.VITE_BUILD_SHA || 'local').slice(0, 8);
 
 const root = document.getElementById('body-test3d-root');
@@ -17,8 +17,8 @@ createRoot(root).render(
     <div className="lab3d-release-strip" role="status" aria-label="Версия опубликованного теста">
       <strong>TEST3D v{TEST3D_VERSION}</strong>
       <span>build {BUILD_SHA}</span>
-      <span>OxiHuman + CharacterMaker shapes</span>
+      <span>CharacterBody Engine · OxiHuman + MakeHuman CC0</span>
     </div>
-    <Test3DAppV3 />
+    <Test3DAppV4 />
   </StrictMode>,
 );
