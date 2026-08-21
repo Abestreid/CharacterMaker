@@ -25,7 +25,7 @@ env:
 jobs:
   build-test-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     defaults:
       run:
@@ -77,12 +77,29 @@ jobs:
         with:
           tool: wasm-pack
 
-      - name: Build OxiHuman browser runtime
+      - name: Build CharacterMaker OxiHuman body pack and browser runtime
         id: oxihuman
         working-directory: .
         run: |
           set -euxo pipefail
-          .vendor/oxihuman/scripts/build_demo.sh
+
+          python3 refactor-v2/scripts/patch_oxihuman_charactermaker.py .vendor/oxihuman
+
+          cd .vendor/oxihuman
+          scripts/fetch_upstream_assets.sh
+          cargo run --release -p oxihuman-cli -- \
+            pack-core \
+            --tier core \
+            --budget-gzip-bytes 4194304
+
+          # Mandatory proof that the custom OHPK contains our CharacterMaker morphs.
+          grep -a -q 'breast/breast-point-incr' assets/packs/oxihuman-core-v1.ohpk
+          grep -a -q 'breast/breast-volume-vert-up' assets/packs/oxihuman-core-v1.ohpk
+          grep -a -q 'buttocks/buttocks-volume-incr' assets/packs/oxihuman-core-v1.ohpk
+          grep -a -q 'hip/hip-scale-depth-incr' assets/packs/oxihuman-core-v1.ohpk
+
+          scripts/build_demo.sh
+          cd ../..
 
           rm -rf refactor-v2/public/test3d/oxihuman
           mkdir -p refactor-v2/public/test3d/oxihuman/pkg
@@ -92,10 +109,13 @@ jobs:
           cp .vendor/oxihuman/demo/pack/oxihuman-core-v1.ohpk refactor-v2/public/test3d/oxihuman/pack/
           cp .vendor/oxihuman/LICENSE refactor-v2/public/test3d/oxihuman/LICENSE-OXIHUMAN.txt
           cp .vendor/oxihuman/NOTICE refactor-v2/public/test3d/oxihuman/NOTICE-OXIHUMAN.txt
+          cp .vendor/oxihuman/assets/upstream/makehuman/LICENSE.ASSETS.md refactor-v2/public/test3d/oxihuman/LICENSE-MAKEHUMAN-ASSETS.txt
 
           test -s refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm.js
           test -s refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
           test -s refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
+          grep -a -q 'breast/breast-point-incr' refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
+          grep -a -q 'buttocks/buttocks-volume-incr' refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
           du -h refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
           du -h refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
 
@@ -136,6 +156,7 @@ jobs:
               'run_id': os.environ['GITHUB_RUN_ID'],
               'built_at': datetime.now(timezone.utc).isoformat(),
               'oxihuman_commit': os.environ['OXIHUMAN_COMMIT'],
+              'body_pack': 'charactermaker-shapes-v1',
           }, ensure_ascii=False, indent=2), encoding='utf-8')
           PY
 
@@ -150,6 +171,8 @@ jobs:
           test -s dist/test3d/oxihuman/pkg/oxihuman_wasm.js
           test -s dist/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
           test -s dist/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
+          grep -a -q 'breast/breast-point-incr' dist/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
+          grep -a -q 'buttocks/buttocks-volume-incr' dist/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
 
       - name: Install FTP client
         id: ftp_client
@@ -206,6 +229,8 @@ jobs:
           actual = remote.get('commit')
           if actual != expected:
               raise SystemExit(f'Remote DEV commit mismatch: expected {expected}, got {actual}')
+          if remote.get('body_pack') != 'charactermaker-shapes-v1':
+              raise SystemExit(f"Remote body pack mismatch: {remote.get('body_pack')}")
           print(f'VERIFIED_REMOTE_COMMIT={actual}')
           PY
 
@@ -279,9 +304,9 @@ jobs:
         run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-android-chrome.png
         working-directory: .
 
-      - name: Verify OxiHuman test3d on Android Chrome profile
+      - name: Verify CharacterMaker test3d on Android Chrome profile
         id: android_oxi
-        run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=15000 --full-page "${DEPLOY_URL}test3d/?commit=$GITHUB_SHA" /tmp/charmaker-dev-test3d-android.png
+        run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=18000 --full-page "${DEPLOY_URL}test3d/?commit=$GITHUB_SHA" /tmp/charmaker-dev-test3d-android.png
         working-directory: .
 
       - name: Upload visual verification
@@ -307,7 +332,7 @@ jobs:
           payload=$(jq -n \
             --arg state success \
             --arg target_url "$DEPLOY_URL" \
-            --arg description "V2 DEV + OxiHuman test3d deployed and verified" \
+            --arg description "V2 DEV + CharacterMaker OxiHuman shape pack deployed" \
             --arg context "deployment/dev" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
@@ -327,7 +352,7 @@ jobs:
           payload=$(jq -n \
             --arg state failure \
             --arg target_url "$DEPLOY_URL" \
-            --arg description "V2 DEV build/deploy/OxiHuman verification failed" \
+            --arg description "V2 DEV / CharacterMaker shape pack build or deploy failed" \
             --arg context "deployment/dev" \
             '{state:$state,target_url:$target_url,description:$description,context:$context}')
           curl --fail-with-body --silent --show-error \
