@@ -8,7 +8,7 @@
 - **MakeHuman assets**: base mesh and morph targets packed into `oxihuman-core-v1.ohpk` during CI.
 - **CharacterBody layer**: CharacterMaker domain parameters, categorical morph mapping, measurement solver, package serialization and validation.
 
-The OxiHuman source is pinned in CI. The CharacterMaker patch restores the adult female MakeHuman breast macro lattice that stock OxiHuman does not pack: age × muscle × weight × cup size × firmness. The deployed pack is rejected if any of the required 162 macro corners or 16 direct shape targets are missing.
+The OxiHuman source is pinned in CI. The CharacterMaker patch restores the adult female MakeHuman breast macro lattice that stock OxiHuman does not pack: age × muscle × weight × cup size × firmness. MakeHuman v1.3.0 authors 144 adult female breast macro target files. The 18 theoretical `averagecup + averagefirmness` corners are intentionally absent upstream because that neutral-neutral combination is the zero-delta base mesh. The deployed CharacterBody pack is rejected if any of the 144 authored macro targets or 16 direct shape targets are missing.
 
 ## Public API
 
@@ -85,7 +85,7 @@ The same validation is used by the diagnostic pack workflow and DEV deployment:
 2. Rust tests verify cup size and firmness are independent runtime dimensions;
 3. MakeHuman upstream assets are fetched;
 4. the CharacterBody OHPK is built with the same pack budget;
-5. provenance must contain all required macro/detail targets and no explicit-anatomy targets;
+5. provenance must contain all 144 authored breast macro targets, all 16 required direct shape targets, and no explicit-anatomy targets; the neutral `averagecup + averagefirmness` state is the base mesh;
 6. TypeScript/Vitest checks and Vite build must pass;
 7. DEV deploy verifies the remote commit and body-package version over FTP and performs HTTP/browser smoke checks.
 
