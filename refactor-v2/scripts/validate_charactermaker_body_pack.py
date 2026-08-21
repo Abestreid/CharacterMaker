@@ -27,6 +27,9 @@ DIRECT_TARGETS = {
 
 
 def breast_macro_targets() -> set[str]:
+    # MakeHuman v1.3.0 does not author averagecup+averagefirmness files.
+    # That neutral-neutral combination is the zero-delta base mesh:
+    # 2 ages * 3 muscle * 3 weight * (9 cup/firmness pairs - 1 base) = 144.
     return {
         f"breast/female-{age}-{muscle}-{weight}-{cup}-{firmness}"
         for age in ("young", "old")
@@ -34,6 +37,7 @@ def breast_macro_targets() -> set[str]:
         for weight in ("minweight", "averageweight", "maxweight")
         for cup in ("mincup", "averagecup", "maxcup")
         for firmness in ("minfirmness", "averagefirmness", "maxfirmness")
+        if not (cup == "averagecup" and firmness == "averagefirmness")
     }
 
 
@@ -47,12 +51,15 @@ def main() -> None:
     names = {row.get("name") for row in rows if isinstance(row, dict) and isinstance(row.get("name"), str)}
     expected_macro = breast_macro_targets()
 
+    if len(expected_macro) != 144:
+        raise SystemExit(f"Internal validator error: expected 144 macro targets, generated {len(expected_macro)}")
+
     missing_direct = sorted(DIRECT_TARGETS - names)
     missing_macro = sorted(expected_macro - names)
     if missing_direct:
         raise SystemExit(f"Missing CharacterBody direct shape targets ({len(missing_direct)}): {missing_direct[:20]}")
     if missing_macro:
-        raise SystemExit(f"Missing CharacterBody breast macro corners ({len(missing_macro)}): {missing_macro[:20]}")
+        raise SystemExit(f"Missing CharacterBody breast macro targets ({len(missing_macro)}): {missing_macro[:20]}")
 
     categorized_direct = {
         row["name"] for row in rows
@@ -78,6 +85,7 @@ def main() -> None:
 
     print(f"CHARACTERBODY_DIRECT_TARGETS={len(DIRECT_TARGETS)}")
     print(f"CHARACTERBODY_BREAST_MACRO_TARGETS={len(expected_macro)}")
+    print("CHARACTERBODY_BREAST_NEUTRAL=implicit_base")
     print(f"CHARACTERBODY_TOTAL_TARGETS={len(names)}")
     print(f"CHARACTERBODY_PACK_VALID={path}")
 
