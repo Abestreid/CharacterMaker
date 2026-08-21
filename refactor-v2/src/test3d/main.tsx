@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Test3DAppV3 } from './Test3DAppV3';
+import './test3d-v3.css';
 
 const root = document.getElementById('body-test3d-root');
 
