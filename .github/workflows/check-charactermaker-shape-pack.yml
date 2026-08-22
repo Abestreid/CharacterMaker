@@ -7,6 +7,7 @@ on:
     paths:
       - 'refactor-v2/scripts/patch_oxihuman_charactermaker.py'
       - 'refactor-v2/scripts/validate_charactermaker_body_pack.py'
+      - 'refactor-v2/scripts/verify_charactermaker_geometry.mjs'
       - 'refactor-v2/src/lib/body3d/**'
       - '.github/workflows/check-charactermaker-shape-pack.yml'
   workflow_dispatch:
@@ -33,6 +34,13 @@ jobs:
           fetch-depth: 1
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
 
       - name: Patch runtime and build CharacterBody v4 OHPK
         run: |
@@ -53,6 +61,15 @@ jobs:
           python3 ../../refactor-v2/scripts/validate_charactermaker_body_pack.py \
             assets/packs/oxihuman-core-v1.provenance.json
 
+          # Build the exact patched WASM runtime for Node and prove that changing
+          # CharacterMaker breast size medium -> very_large changes real vertex
+          # positions in the generated human mesh, not only parameter values.
+          wasm-pack build --release --target nodejs --out-dir pkg-node \
+            crates/oxihuman-wasm --no-default-features --features bindgen
+          node ../../refactor-v2/scripts/verify_charactermaker_geometry.mjs \
+            --pkg crates/oxihuman-wasm/pkg-node \
+            --pack assets/packs/oxihuman-core-v1.ohpk
+
       - name: Mark success
         if: success()
         env:
@@ -62,7 +79,7 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "{\"state\":\"success\",\"target_url\":\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\",\"description\":\"CharacterBody v4: 144 breast macro targets + neutral base verified\",\"context\":\"diagnostic/shape-pack\"}" >/dev/null
+            -d "{\"state\":\"success\",\"target_url\":\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\",\"description\":\"CharacterBody v4 pack + real cup vertex deformation verified\",\"context\":\"diagnostic/shape-pack\"}" >/dev/null
 
       - name: Mark failure
         if: failure()
@@ -73,4 +90,4 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -d "{\"state\":\"failure\",\"target_url\":\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\",\"description\":\"CharacterBody v4 macro pack build failed\",\"context\":\"diagnostic/shape-pack\"}" >/dev/null
+            -d "{\"state\":\"failure\",\"target_url\":\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\",\"description\":\"CharacterBody v4 pack or geometry deformation check failed\",\"context\":\"diagnostic/shape-pack\"}" >/dev/null
