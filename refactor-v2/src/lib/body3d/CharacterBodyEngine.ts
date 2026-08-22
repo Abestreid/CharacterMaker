@@ -28,11 +28,15 @@ export type CharacterBodyFitResult = OxiFitResult & {
 type InternalEngine = {
   set_param: (name: string, value: number) => void;
   get_measurements_json: () => string;
+  positions_len: () => number;
+  indices_len: () => number;
 };
 
 type SceneInternals = {
   engine: InternalEngine;
   refreshGeometry: (reframe: boolean) => void;
+  getSourceVertexCount: () => number;
+  getSourceIndexCount: () => number;
 };
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -74,7 +78,19 @@ export class CharacterBodyEngine {
     canvas: HTMLCanvasElement,
     onProgress?: (progress: OxiLoadProgress) => void,
   ) {
-    return new CharacterBodyEngine(await OxiHumanSceneV3.create(canvas, onProgress));
+    const scene = await OxiHumanSceneV3.create(canvas, onProgress);
+
+    // OxiHuman 0.2.1 exposes `vertex_count()`, `positions_len()` and
+    // `indices_len()` through wasm-bindgen. The older V3 scene adapter used
+    // non-existent JS names `get_vertex_count()` / `get_index_count()` only
+    // when constructing the fit result, which left the rendered mesh working
+    // but made every successful fit end with a TypeError. Keep the compatibility
+    // fix at the package boundary until the legacy V3 scene is removed.
+    const internals = scene as unknown as SceneInternals;
+    internals.getSourceVertexCount = () => Math.floor(internals.engine.positions_len() / 3);
+    internals.getSourceIndexCount = () => internals.engine.indices_len();
+
+    return new CharacterBodyEngine(scene);
   }
 
   dispose() { this.scene.dispose(); }
