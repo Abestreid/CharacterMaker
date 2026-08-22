@@ -86,7 +86,8 @@ The same validation is used by the diagnostic pack workflow and DEV deployment:
 3. MakeHuman upstream assets are fetched;
 4. the CharacterBody OHPK is built with the same pack budget;
 5. provenance must contain all 144 authored breast macro targets, all 16 required direct shape targets, and no explicit-anatomy targets; the neutral `averagecup + averagefirmness` state is the base mesh;
-6. TypeScript/Vitest checks and Vite build must pass;
-7. DEV deploy verifies the remote commit and body-package version over FTP and performs HTTP/browser smoke checks.
+6. the patched WASM runtime is built for Node and an end-to-end geometry probe compares actual zero-copy vertex buffers for `medium` (`cupsize=0.5`) versus `very_large` (`cupsize=1.0`); CI fails if the real mesh does not deform;
+7. TypeScript/Vitest checks and Vite build must pass;
+8. DEV deploy verifies the remote commit and body-package version over FTP and performs HTTP/browser smoke checks.
 
 This file documents the package boundary. Production CharacterMaker should depend on `src/lib/body3d`, not on implementation details inside `src/test3d`.
