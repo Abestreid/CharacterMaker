@@ -1,0 +1,372 @@
+name: Deploy CharacterMaker V2 DEV
+
+on:
+  push:
+    branches:
+      - refactor/domain-catalog-v2
+    paths:
+      - 'refactor-v2/**'
+      - '.github/workflows/deploy-v2-dev.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: charactermaker-v2-dev
+  cancel-in-progress: true
+
+env:
+  DEPLOY_DIR: /htdocs/dev
+  DEPLOY_URL: https://charmaker.free.nf/dev/
+  OXIHUMAN_COMMIT: 603b446854c3d5a9ca478214e7b85008d54786b9
+  VITE_BUILD_SHA: ${{ github.sha }}
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        working-directory: refactor-v2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Mark deployment pending
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          payload=$(jq -n \
+            --arg state pending \
+            --arg target_url "$run_url" \
+            --arg description "CharacterMaker V2 DEV deployment in progress" \
+            --arg context "deployment/dev" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Checkout pinned OxiHuman source
+        uses: actions/checkout@v4
+        with:
+          repository: cool-japan/oxihuman
+          ref: ${{ env.OXIHUMAN_COMMIT }}
+          path: .vendor/oxihuman
+          fetch-depth: 1
+
+      - name: Setup Rust for OxiHuman WASM
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Build CharacterBody v4 pack and browser runtime
+        id: oxihuman
+        working-directory: .
+        run: |
+          set -euxo pipefail
+
+          python3 refactor-v2/scripts/patch_oxihuman_charactermaker.py .vendor/oxihuman
+
+          cd .vendor/oxihuman
+          cargo test -p oxihuman-wasm charactermaker_breast_macro_tests -- --nocapture
+          scripts/fetch_upstream_assets.sh
+          cargo run --release -p oxihuman-cli -- \
+            pack-core \
+            --tier core \
+            --budget-gzip-bytes 12582912
+
+          test -s assets/packs/oxihuman-core-v1.ohpk
+          test -s assets/packs/oxihuman-core-v1.provenance.json
+          python3 ../../refactor-v2/scripts/validate_charactermaker_body_pack.py \
+            assets/packs/oxihuman-core-v1.provenance.json
+
+          scripts/build_demo.sh
+          cd ../..
+
+          rm -rf refactor-v2/public/test3d/oxihuman
+          mkdir -p refactor-v2/public/test3d/oxihuman/pkg
+          mkdir -p refactor-v2/public/test3d/oxihuman/pack
+
+          cp -a .vendor/oxihuman/demo/pkg/. refactor-v2/public/test3d/oxihuman/pkg/
+          cp .vendor/oxihuman/demo/pack/oxihuman-core-v1.ohpk refactor-v2/public/test3d/oxihuman/pack/
+          cp .vendor/oxihuman/assets/packs/oxihuman-core-v1.provenance.json refactor-v2/public/test3d/oxihuman/pack/
+          cp .vendor/oxihuman/LICENSE refactor-v2/public/test3d/oxihuman/LICENSE-OXIHUMAN.txt
+          cp .vendor/oxihuman/NOTICE refactor-v2/public/test3d/oxihuman/NOTICE-OXIHUMAN.txt
+          cp .vendor/oxihuman/assets/upstream/makehuman/LICENSE.ASSETS.md refactor-v2/public/test3d/oxihuman/LICENSE-MAKEHUMAN-ASSETS.txt
+
+          test -s refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm.js
+          test -s refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
+          test -s refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
+          test -s refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.provenance.json
+          du -h refactor-v2/public/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
+          du -h refactor-v2/public/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
+
+      - name: Install dependencies
+        id: dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck and tests
+        id: check
+        run: npm run check
+
+      - name: Production build
+        id: build
+        run: npm run build
+
+      - name: Add DEV metadata and noindex protection
+        id: metadata
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          index = Path('dist/index.html')
+          html = index.read_text(encoding='utf-8')
+          tag = '<meta name="robots" content="noindex,nofollow,noarchive" />'
+          if tag not in html:
+              if '</head>' not in html:
+                  raise SystemExit('Cannot inject robots meta: </head> not found')
+              html = html.replace('</head>', f'  {tag}\n</head>', 1)
+              index.write_text(html, encoding='utf-8')
+
+          Path('dist/robots.txt').write_text('User-agent: *\nDisallow: /\n', encoding='utf-8')
+          Path('dist/build-info.json').write_text(json.dumps({
+              'commit': os.environ['GITHUB_SHA'],
+              'ref': os.environ['GITHUB_REF_NAME'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'built_at': datetime.now(timezone.utc).isoformat(),
+              'oxihuman_commit': os.environ['OXIHUMAN_COMMIT'],
+              'body_pack': 'charactermaker-body-v4',
+              'test3d_version': '4.0.0',
+          }, ensure_ascii=False, indent=2), encoding='utf-8')
+          PY
+
+      - name: Validate deploy target
+        id: validate
+        run: |
+          test "$DEPLOY_DIR" = "/htdocs/dev"
+          test -f dist/index.html
+          test -f dist/build-info.json
+          test -d dist/assets
+          test -f dist/test3d/index.html
+          test -s dist/test3d/oxihuman/pkg/oxihuman_wasm.js
+          test -s dist/test3d/oxihuman/pkg/oxihuman_wasm_bg.wasm
+          test -s dist/test3d/oxihuman/pack/oxihuman-core-v1.ohpk
+          test -s dist/test3d/oxihuman/pack/oxihuman-core-v1.provenance.json
+          python scripts/validate_charactermaker_body_pack.py \
+            dist/test3d/oxihuman/pack/oxihuman-core-v1.provenance.json
+
+      - name: Install FTP client
+        id: ftp_client
+        run: sudo apt-get update && sudo apt-get install -y lftp
+        working-directory: .
+
+      - name: Deploy DEV to InfinityFree
+        id: deploy
+        env:
+          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME || secrets.FTP_USERNAME || secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD || secrets.FTP_PASSWORD || secrets.FTP_PASS }}
+        run: |
+          test -n "$FTP_SERVER"
+          test -n "$FTP_USERNAME"
+          test -n "$FTP_PASSWORD"
+          lftp -c "
+            set ftp:passive-mode true;
+            set net:max-retries 3;
+            set net:timeout 20;
+            open -p 21 ftp://$FTP_SERVER;
+            user $FTP_USERNAME $FTP_PASSWORD;
+            cd $DEPLOY_DIR;
+            mirror --reverse --delete --no-perms --verbose --parallel=4 dist/ .;
+            bye
+          "
+
+      - name: Verify deployed commit over FTP
+        id: verify_ftp
+        working-directory: .
+        env:
+          FTP_SERVER: ${{ secrets.CHARMAKER_FTP_SERVER || secrets.FTP_SERVER || secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.CHARMAKER_FTP_USERNAME || secrets.FTP_USERNAME || secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.CHARMAKER_FTP_PASSWORD || secrets.FTP_PASSWORD || secrets.FTP_PASS }}
+        run: |
+          rm -f /tmp/charmaker-build-info.json
+          lftp -c "
+            set ftp:passive-mode true;
+            set net:max-retries 3;
+            set net:timeout 20;
+            open -p 21 ftp://$FTP_SERVER;
+            user $FTP_USERNAME $FTP_PASSWORD;
+            cd $DEPLOY_DIR;
+            get build-info.json -o /tmp/charmaker-build-info.json;
+            bye
+          "
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          remote = json.loads(Path('/tmp/charmaker-build-info.json').read_text(encoding='utf-8'))
+          expected = os.environ['GITHUB_SHA']
+          actual = remote.get('commit')
+          if actual != expected:
+              raise SystemExit(f'Remote DEV commit mismatch: expected {expected}, got {actual}')
+          if remote.get('body_pack') != 'charactermaker-body-v4':
+              raise SystemExit(f"Remote body pack mismatch: {remote.get('body_pack')}")
+          if remote.get('test3d_version') != '4.0.0':
+              raise SystemExit(f"Remote test3d version mismatch: {remote.get('test3d_version')}")
+          print(f'VERIFIED_REMOTE_COMMIT={actual}')
+          PY
+
+      - name: HTTP smoke check
+        id: http
+        working-directory: .
+        run: |
+          set -e
+          url="$DEPLOY_URL?commit=$GITHUB_SHA"
+          user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+          for attempt in 1 2 3 4 5 6; do
+            rm -f /tmp/charmaker-dev.html /tmp/charmaker-http-code.txt
+            code=$(curl --location --silent --show-error --max-time 30 \
+              --connect-timeout 15 \
+              --user-agent "$user_agent" \
+              -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' \
+              -H 'Cache-Control: no-cache' \
+              -w '%{http_code}' \
+              "$url" -o /tmp/charmaker-dev.html || true)
+            echo "HTTP attempt $attempt: $code"
+            if [ "$code" = "200" ] && [ -s /tmp/charmaker-dev.html ]; then
+              grep -qi '<html\|<!doctype' /tmp/charmaker-dev.html
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "DEV HTTP smoke failed after retries" >&2
+          if [ -f /tmp/charmaker-dev.html ]; then head -c 500 /tmp/charmaker-dev.html || true; fi
+          exit 1
+
+      - name: CharacterBody test3d asset smoke check
+        id: oxihuman_http
+        working-directory: .
+        run: |
+          set -euo pipefail
+          user_agent='Mozilla/5.0 (Linux; Android 14; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36'
+          base="${DEPLOY_URL}test3d/"
+          for path in \
+            "?commit=$GITHUB_SHA" \
+            "oxihuman/pkg/oxihuman_wasm.js?commit=$GITHUB_SHA" \
+            "oxihuman/pkg/oxihuman_wasm_bg.wasm?commit=$GITHUB_SHA" \
+            "oxihuman/pack/oxihuman-core-v1.ohpk?commit=$GITHUB_SHA" \
+            "oxihuman/pack/oxihuman-core-v1.provenance.json?commit=$GITHUB_SHA"; do
+            code=$(curl --location --silent --show-error --max-time 45 \
+              --connect-timeout 15 \
+              --user-agent "$user_agent" \
+              -H 'Cache-Control: no-cache' \
+              -w '%{http_code}' \
+              "${base}${path}" -o /tmp/oxi-smoke.bin || true)
+            echo "${path}: HTTP ${code}, bytes=$(wc -c < /tmp/oxi-smoke.bin 2>/dev/null || echo 0)"
+            test "$code" = "200"
+            test -s /tmp/oxi-smoke.bin
+          done
+
+      - name: Install browsers for mandatory visual verification
+        id: browsers
+        run: npx --yes playwright@latest install --with-deps chromium webkit
+        working-directory: .
+
+      - name: Verify and capture desktop Chrome
+        id: desktop
+        run: npx --yes playwright@latest screenshot --browser=chromium --device="Desktop Chrome" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-desktop-chrome.png
+        working-directory: .
+
+      - name: Verify and capture iOS Safari profile
+        id: ios
+        run: npx --yes playwright@latest screenshot --browser=webkit --device="iPhone 13" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-ios-webkit.png
+        working-directory: .
+
+      - name: Verify and capture Android Chrome profile
+        id: android
+        run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=5000 --full-page "$DEPLOY_URL?commit=$GITHUB_SHA" /tmp/charmaker-dev-android-chrome.png
+        working-directory: .
+
+      - name: Verify CharacterBody test3d on Android Chrome profile
+        id: android_oxi
+        run: npx --yes playwright@latest screenshot --browser=chromium --device="Pixel 5" --wait-for-timeout=18000 --full-page "${DEPLOY_URL}test3d/?commit=$GITHUB_SHA" /tmp/charmaker-dev-test3d-android.png
+        working-directory: .
+
+      - name: Upload visual verification
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: charmaker-dev-screenshots
+          path: |
+            /tmp/charmaker-dev-desktop-chrome.png
+            /tmp/charmaker-dev-ios-webkit.png
+            /tmp/charmaker-dev-android-chrome.png
+            /tmp/charmaker-dev-test3d-android.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Mark deployment success
+        if: success()
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          payload=$(jq -n \
+            --arg state success \
+            --arg target_url "$DEPLOY_URL" \
+            --arg description "DEV + TEST3D v4.0.0 CharacterBody v4 deployed" \
+            --arg context "deployment/dev" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
+
+      - name: Mark deployment failure
+        if: failure()
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          payload=$(jq -n \
+            --arg state failure \
+            --arg target_url "$run_url" \
+            --arg description "TEST3D v4.0.0 CharacterBody build or deploy failed" \
+            --arg context "deployment/dev" \
+            '{state:$state,target_url:$target_url,description:$description,context:$context}')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "$payload" >/dev/null
